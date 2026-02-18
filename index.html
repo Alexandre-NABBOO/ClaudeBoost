@@ -144,23 +144,23 @@ function NabbooMatcher() {
     setStep(1.5); setPbStatus("Lancement..."); setProgress(10); setError("");
     try {
       const searchUrl = buildLinkedInSearchURL(criteria);
-      // Step 1: Save new search URL into phantom config (keeps cookie intact)
+      // Step 1: Fetch current phantom config (includes session cookie)
+      const fetchRes = await fetch("https://api.phantombuster.com/api/v2/agents/fetch?id=7681967140145623", {
+        headers: { "X-Phantombuster-Key": pbApiKey },
+      });
+      if (!fetchRes.ok) throw new Error("Impossible de récupérer la config du phantom");
+      const agentData = await fetchRes.json();
+      const currentArg = typeof agentData.argument === "string" ? JSON.parse(agentData.argument) : (agentData.argument || {});
+      setPbStatus("Configuration récupérée..."); setProgress(12);
+      // Step 2: Merge only the search URL into existing config (keeps cookie!)
+      const mergedArg = { ...currentArg, linkedInSearchUrl: searchUrl, searchType: "linkedInSearchUrl", category: "People", numberOfResultsPerLaunch: 100, numberOfResultsPerSearch: 100 };
       const saveRes = await fetch("https://api.phantombuster.com/api/v2/agents/save", {
         method: "POST", headers: { "Content-Type": "application/json", "X-Phantombuster-Key": pbApiKey },
-        body: JSON.stringify({ id: "7681967140145623", argument: {
-          searchType: "linkedInSearchUrl",
-          linkedInSearchUrl: searchUrl,
-          category: "People",
-          numberOfLinesPerLaunch: 10,
-          numberOfResultsPerLaunch: 100,
-          numberOfResultsPerSearch: 100,
-          connectionDegreesToScrape: ["2", "3+"],
-          enrichLeadsWithAdditionalInformation: true
-        } }),
+        body: JSON.stringify({ id: "7681967140145623", argument: mergedArg }),
       });
       if (!saveRes.ok) { const err = await saveRes.json().catch(() => ({})); throw new Error(`Save échoué: ${JSON.stringify(err)}`); }
-      setPbStatus("Configuration OK, lancement..."); setProgress(15);
-      // Step 2: Launch without arguments (uses saved config + saved cookie)
+      setPbStatus("Config mise à jour, lancement..."); setProgress(18);
+      // Step 3: Launch without arguments (uses saved config with cookie intact)
       const r = await fetch("https://api.phantombuster.com/api/v2/agents/launch", {
         method: "POST", headers: { "Content-Type": "application/json", "X-Phantombuster-Key": pbApiKey },
         body: JSON.stringify({ id: "7681967140145623" }),
