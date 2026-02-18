@@ -506,6 +506,17 @@ INSTRUCTIONS:
               <div style={{ marginBottom: 20 }}><label style={{ fontSize: 13, fontWeight: 600, color: NABBOO_BLUE, display: "block", marginBottom: 6 }}>Description du besoin</label><textarea value={criteria.description} onChange={e => setCriteria(p => ({ ...p, description: e.target.value }))} placeholder="Ex: Mission longue durée chez Framatome, programme EPR2..." rows={2} style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit", fontSize: 13 }} /></div>
               <div style={{ borderTop: "1px solid #eee", paddingTop: 20, display: "flex", flexDirection: "column", gap: 12 }}>
                 <button onClick={launchPhantomBuster} disabled={!criteria.jobTitle} style={{ padding: "14px 24px", borderRadius: 12, border: "none", background: criteria.jobTitle ? `linear-gradient(135deg, ${ACCENT}, #d4782e)` : "#ddd", fontSize: 15, fontWeight: 700, color: "#fff", cursor: criteria.jobTitle ? "pointer" : "not-allowed", boxShadow: criteria.jobTitle ? "0 4px 12px rgba(232,150,62,0.3)" : "none" }}>🚀 Lancer la recherche automatique</button>
+                {pbApiKey && <button onClick={async () => {
+                  try {
+                    const res = await fetch("https://api.phantombuster.com/api/v2/agents/fetch?id=7681967140145623", { headers: { "X-Phantombuster-Key": pbApiKey } });
+                    const data = await res.json();
+                    const arg = typeof data.argument === "string" ? JSON.parse(data.argument) : data.argument;
+                    const keys = arg ? Object.keys(arg) : [];
+                    const hasCookie = arg && ("sessionCookie" in arg);
+                    const identity = data.identityId || data.linkedInIdentityId || "non trouvé";
+                    setError(`🔍 DEBUG — Champs argument: [${keys.join(", ")}] | sessionCookie dans arg: ${hasCookie ? "OUI" : "NON"} | identityId: ${identity} | agentStatus: ${data.agentStatus || "?"} | lastEndMessage: ${data.lastEndMessage || "?"} | Tout: ${JSON.stringify(data).substring(0, 500)}`);
+                  } catch (err) { setError("Debug erreur: " + err.message); }
+                }} style={{ padding: "8px 16px", borderRadius: 8, border: "1px solid #ddd", background: "#fff", fontSize: 11, color: MUTED, cursor: "pointer" }}>🔍 Debug PB</button>}
                 <div style={{ display: "flex", alignItems: "center", gap: 12 }}><div style={{ flex: 1, height: 1, background: "#e0e0e0" }} /><span style={{ fontSize: 12, color: MUTED }}>ou</span><div style={{ flex: 1, height: 1, background: "#e0e0e0" }} /></div>
                 <div onDragOver={e => { e.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)} onDrop={handleDrop} onClick={() => fileInputRef.current?.click()} style={{ border: `2px dashed ${dragOver ? ACCENT : "#d0d0d0"}`, borderRadius: 12, padding: 20, textAlign: "center", cursor: "pointer" }}><div style={{ fontSize: 13, fontWeight: 500, color: MUTED }}>📄 Importer un CSV manuellement</div><input ref={fileInputRef} type="file" accept=".csv" style={{ display: "none" }} onChange={e => handleFile(e.target.files[0])} /></div>
               </div>
