@@ -141,13 +141,20 @@ function NabbooMatcher() {
 
   const launchPhantomBuster = async () => {
     if (!pbApiKey) { setError("Configurez votre clé API PhantomBuster (⚙️)"); return; }
-    if (!linkedinCookie) { setError("Configurez votre cookie LinkedIn li_at (⚙️)"); setShowConfig(true); return; }
     setStep(1.5); setPbStatus("Lancement..."); setProgress(10); setError("");
     try {
       const searchUrl = buildLinkedInSearchURL(criteria);
       const r = await fetch("https://api.phantombuster.com/api/v2/agents/launch", {
         method: "POST", headers: { "Content-Type": "application/json", "X-Phantombuster-Key": pbApiKey },
-        body: JSON.stringify({ id: "7681967140145623", argument: { searches: searchUrl, sessionCookie: linkedinCookie, numberOfResultsPerSearch: 25 } }),
+        body: JSON.stringify({ id: "7681967140145623", argument: JSON.stringify({
+          searchType: "linkedInSearchUrl",
+          linkedInSearchUrl: searchUrl,
+          category: "People",
+          numberOfResultsPerLaunch: 100,
+          numberOfResultsPerSearch: 100,
+          connectionDegreesToScrape: ["2", "3+"],
+          enrichLeadsWithAdditionalInformation: true
+        }) }),
       });
       if (!r.ok) { const errBody = await r.json().catch(() => ({})); throw new Error(errBody.error || errBody.message || `Erreur ${r.status}`); }
       const launchData = await r.json().catch(() => ({}));
@@ -426,9 +433,8 @@ INSTRUCTIONS:
             </div>
             <div style={{ flex: 1, minWidth: 200 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: NABBOO_BLUE, marginBottom: 8 }}>🔑 PhantomBuster</div>
-              <input type="password" value={pbApiKey} onChange={e => updateConfig("pbApiKey", e.target.value, setPbApiKey)} placeholder="Clé API PhantomBuster" style={{ ...inputStyle, fontSize: 12, padding: "8px 12px", marginBottom: 4 }} />
-              <input type="password" value={linkedinCookie} onChange={e => updateConfig("linkedinCookie", e.target.value, setLinkedinCookie)} placeholder="Cookie LinkedIn (li_at)" style={{ ...inputStyle, fontSize: 12, padding: "8px 12px" }} />
-              <div style={{ fontSize: 11, color: pbApiKey && linkedinCookie ? "#22a55b" : pbApiKey ? "#f39c12" : MUTED, marginTop: 4, fontWeight: 600 }}>{pbApiKey && linkedinCookie ? "✅ Prêt" : pbApiKey ? "⚠️ Cookie manquant" : "Optionnel"}</div>
+              <input type="password" value={pbApiKey} onChange={e => updateConfig("pbApiKey", e.target.value, setPbApiKey)} placeholder="Clé API PhantomBuster" style={{ ...inputStyle, fontSize: 12, padding: "8px 12px" }} />
+              <div style={{ fontSize: 11, color: pbApiKey ? "#22a55b" : MUTED, marginTop: 4, fontWeight: 600 }}>{pbApiKey ? "✅ Prêt" : "Optionnel"}</div>
             </div>
             <div style={{ flex: 1, minWidth: 200 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: NABBOO_BLUE, marginBottom: 8 }}>📱 Kaspr</div>
