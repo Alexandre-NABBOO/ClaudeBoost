@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Nabboo Matcher — Pipeline de sourcing intelligent</title>
+  <title>ClaudeBoost — Le NABBOOST de Claude</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎯</text></svg>" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
@@ -87,6 +87,7 @@ function NabbooMatcher() {
   const [showConfig, setShowConfig] = useState(false);
   const [pbApiKey, setPbApiKey] = useState(saved.pbApiKey || "");
   const [pbStatus, setPbStatus] = useState("");
+  const [linkedinCookie, setLinkedinCookie] = useState(saved.linkedinCookie || "");
   const [kasprKey, setKasprKey] = useState(saved.kasprKey || "");
   const [boondToken, setBoondToken] = useState(saved.boondToken || "");
   const [boondKey, setBoondKey] = useState(saved.boondKey || "");
@@ -140,26 +141,46 @@ function NabbooMatcher() {
 
   const launchPhantomBuster = async () => {
     if (!pbApiKey) { setError("Configurez votre clé API PhantomBuster (⚙️)"); return; }
+    if (!linkedinCookie) { setError("Configurez votre cookie LinkedIn li_at (⚙️)"); setShowConfig(true); return; }
     setStep(1.5); setPbStatus("Lancement..."); setProgress(10); setError("");
     try {
+      const searchUrl = buildLinkedInSearchURL(criteria);
       const r = await fetch("https://api.phantombuster.com/api/v2/agents/launch", {
         method: "POST", headers: { "Content-Type": "application/json", "X-Phantombuster-Key": pbApiKey },
-        body: JSON.stringify({ id: "7681967140145623" }),
+        body: JSON.stringify({ id: "7681967140145623", argument: { searches: searchUrl, sessionCookie: linkedinCookie, numberOfResultsPerSearch: 25 } }),
       });
-      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `Erreur ${r.status}`);
+      if (!r.ok) { const errBody = await r.json().catch(() => ({})); throw new Error(errBody.error || errBody.message || `Erreur ${r.status}`); }
+      const launchData = await r.json().catch(() => ({}));
+      const containerId = launchData.containerId;
       setPbStatus("Recherche LinkedIn..."); setProgress(25);
       let att = 0, done = false;
       while (att < 80 && !done) {
         await new Promise(r => setTimeout(r, 15000)); att++;
         setProgress(25 + Math.min(55, att * 2)); setPbStatus(`Extraction... (${att * 15}s)`);
         const s = await fetch(`https://api.phantombuster.com/api/v2/agents/fetch?id=7681967140145623`, { headers: { "X-Phantombuster-Key": pbApiKey } });
-        if (s.ok) { const d = await s.json(); if (d.s3Status === "available" || d.lastEndMessage) done = true; }
+        if (s.ok) { const d = await s.json(); if (d.agentStatus === "not running" || d.s3Status === "available" || d.lastEndMessage) done = true; }
       }
       if (!done) throw new Error("PhantomBuster est encore en cours. Téléchargez le CSV depuis PhantomBuster et importez-le.");
-      setPbStatus("Récupération..."); setProgress(75);
+      setPbStatus("Récupération des résultats..."); setProgress(75);
+      // Try fetch-output first
       const o = await fetch(`https://api.phantombuster.com/api/v2/agents/fetch-output?id=7681967140145623`, { headers: { "X-Phantombuster-Key": pbApiKey } });
-      if (o.ok) { const d = await o.json(); if (d.resultObject) { const t = await (await fetch(d.resultObject)).text(); const p = parseCSVText(t); if (p.length > 0) { setProfiles(p); setProgress(100); setTimeout(() => setStep(2), 1000); return; } } }
-      throw new Error("Téléchargez le CSV depuis PhantomBuster.");
+      if (o.ok) {
+        const d = await o.json();
+        if (d.resultObject) {
+          try { const t = await (await fetch(d.resultObject)).text(); const p = parseCSVText(t); if (p.length > 0) { setProfiles(p); setProgress(100); setTimeout(() => setStep(2), 1000); return; } } catch {}
+        }
+      }
+      // Fallback: try containers endpoint
+      if (containerId) {
+        const c = await fetch(`https://api.phantombuster.com/api/v2/containers/fetch-result-object?id=${containerId}`, { headers: { "X-Phantombuster-Key": pbApiKey } });
+        if (c.ok) {
+          const cd = await c.json();
+          if (cd.resultObject) {
+            try { const t = await (await fetch(cd.resultObject)).text(); const p = parseCSVText(t); if (p.length > 0) { setProfiles(p); setProgress(100); setTimeout(() => setStep(2), 1000); return; } } catch {}
+          }
+        }
+      }
+      throw new Error("Résultats non trouvés. Téléchargez le CSV depuis PhantomBuster.");
     } catch (err) {
       setError(err.message.includes("fetch") || err.message.includes("CORS") ? "Restriction navigateur — importez le CSV manuellement." : "Erreur: " + err.message);
       setPbStatus(""); setStep(1);
@@ -338,7 +359,7 @@ INSTRUCTIONS:
             sourceType: 6, source: "Sourcing LinkedIn",
             phone1: phoneNum, email1: emailAddr, city: profile.location || "",
             information: {
-              comments: `Source: Sourcing LinkedIn\nProfil: ${profile.linkedinProfileUrl || profile.profileUrl || ""}\nTitre LinkedIn: ${profile.headline || profile.jobTitle || ""}\nEntreprise: ${profile.company || ""}\nLocalisation: ${profile.location || ""}\nFormation: ${profile.school || ""} - ${profile.schoolDegree || ""}\n${phoneNum ? "Téléphone: " + phoneNum + "\n" : ""}${emailAddr ? "Email: " + emailAddr + "\n" : ""}Score Nabboo Matcher: ${profile.score || "N/A"}/100\nFiliale suggérée: ${profile.suggestedSubsidiary || "N/A"}\nDate import: ${new Date().toLocaleDateString("fr-FR")}`,
+              comments: `Source: Sourcing LinkedIn\nProfil: ${profile.linkedinProfileUrl || profile.profileUrl || ""}\nTitre LinkedIn: ${profile.headline || profile.jobTitle || ""}\nEntreprise: ${profile.company || ""}\nLocalisation: ${profile.location || ""}\nFormation: ${profile.school || ""} - ${profile.schoolDegree || ""}\n${phoneNum ? "Téléphone: " + phoneNum + "\n" : ""}${emailAddr ? "Email: " + emailAddr + "\n" : ""}Score ClaudeBoost: ${profile.score || "N/A"}/100\nFiliale suggérée: ${profile.suggestedSubsidiary || "N/A"}\nDate import: ${new Date().toLocaleDateString("fr-FR")}`,
             }
           },
           relationships: {
@@ -384,8 +405,8 @@ INSTRUCTIONS:
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <div style={{ width: 36, height: 36, borderRadius: 8, background: `linear-gradient(135deg, ${ACCENT}, #d4782e)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, fontWeight: 700, color: "#fff" }}>N</div>
           <div>
-            <div style={{ color: "#fff", fontSize: 16, fontWeight: 700 }}>Nabboo Matcher</div>
-            <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 10 }}>Pipeline de sourcing complet</div>
+            <div style={{ color: "#fff", fontSize: 16, fontWeight: 700 }}>ClaudeBoost</div>
+            <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 10 }}>Le NABBOOST ... de Claude</div>
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -405,8 +426,9 @@ INSTRUCTIONS:
             </div>
             <div style={{ flex: 1, minWidth: 200 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: NABBOO_BLUE, marginBottom: 8 }}>🔑 PhantomBuster</div>
-              <input type="password" value={pbApiKey} onChange={e => updateConfig("pbApiKey", e.target.value, setPbApiKey)} placeholder="Clé API PhantomBuster" style={{ ...inputStyle, fontSize: 12, padding: "8px 12px" }} />
-              <div style={{ fontSize: 11, color: pbApiKey ? "#22a55b" : MUTED, marginTop: 4, fontWeight: 600 }}>{pbApiKey ? "✅" : "Optionnel"}</div>
+              <input type="password" value={pbApiKey} onChange={e => updateConfig("pbApiKey", e.target.value, setPbApiKey)} placeholder="Clé API PhantomBuster" style={{ ...inputStyle, fontSize: 12, padding: "8px 12px", marginBottom: 4 }} />
+              <input type="password" value={linkedinCookie} onChange={e => updateConfig("linkedinCookie", e.target.value, setLinkedinCookie)} placeholder="Cookie LinkedIn (li_at)" style={{ ...inputStyle, fontSize: 12, padding: "8px 12px" }} />
+              <div style={{ fontSize: 11, color: pbApiKey && linkedinCookie ? "#22a55b" : pbApiKey ? "#f39c12" : MUTED, marginTop: 4, fontWeight: 600 }}>{pbApiKey && linkedinCookie ? "✅ Prêt" : pbApiKey ? "⚠️ Cookie manquant" : "Optionnel"}</div>
             </div>
             <div style={{ flex: 1, minWidth: 200 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: NABBOO_BLUE, marginBottom: 8 }}>📱 Kaspr</div>
