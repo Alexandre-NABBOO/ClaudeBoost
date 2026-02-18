@@ -80,6 +80,19 @@ function saveSession(data) {
   try { sessionStorage.setItem("nabboo-session", JSON.stringify(data)); } catch {}
 }
 
+// --- JWT HMAC-SHA256 for Boond API ---
+async function buildBoondJWT(clientToken, clientKey, userToken) {
+  const header = btoa(JSON.stringify({ alg: "HS256", typ: "JWT" })).replace(/=/g, "");
+  const now = Math.floor(Date.now() / 1000);
+  const payload = btoa(JSON.stringify({ clientToken, userToken, iat: now, exp: now + 300 })).replace(/=/g, "");
+  const data = header + "." + payload;
+  const keyBytes = new TextEncoder().encode(clientKey);
+  const cryptoKey = await crypto.subtle.importKey("raw", keyBytes, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const sig = await crypto.subtle.sign("HMAC", cryptoKey, new TextEncoder().encode(data));
+  const sigB64 = btoa(String.fromCharCode(...new Uint8Array(sig))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+  return data + "." + sigB64;
+}
+
 function NabbooMatcher() {
   const saved = loadConfig();
   const session = loadSession();
@@ -97,8 +110,9 @@ function NabbooMatcher() {
   const [pbStatus, setPbStatus] = useState("");
   const [linkedinCookie, setLinkedinCookie] = useState(saved.linkedinCookie || "");
   const [kasprKey, setKasprKey] = useState(saved.kasprKey || "");
-  const [boondToken, setBoondToken] = useState(saved.boondToken || "");
-  const [boondKey, setBoondKey] = useState(saved.boondKey || "");
+  const [boondClientToken, setBoondClientToken] = useState(saved.boondClientToken || "");
+  const [boondClientKey, setBoondClientKey] = useState(saved.boondClientKey || "");
+  const [boondUserToken, setBoondUserToken] = useState(saved.boondUserToken || "");
   const [boondProxy, setBoondProxy] = useState(saved.boondProxy || "");
   const [recruiterName, setRecruiterName] = useState(saved.recruiterName || "");
   const [recruiterTitle, setRecruiterTitle] = useState(saved.recruiterTitle || "");
@@ -375,9 +389,10 @@ INSTRUCTIONS:
   };
 
   const addToBoond = async (profile) => {
-    if (!boondToken || !boondKey) { setError("Configurez vos identifiants Boond (⚙️)"); setShowConfig(true); return; }
+    if (!boondClientToken || !boondClientKey || !boondUserToken) { setError("Configurez vos 3 identifiants Boond (⚙️)"); setShowConfig(true); return; }
     setBoondModal(profile); setBoondStatus("creating");
     try {
+      const jwt = await buildBoondJWT(boondClientToken, boondClientKey, boondUserToken);
       const names = (profile.fullName || "").split(" ");
       const firstName = profile.firstName || names[0] || "";
       const lastName = (profile.lastName || names.slice(1).join(" ") || "").toUpperCase();
@@ -403,10 +418,10 @@ INSTRUCTIONS:
           }
         }
       };
-      const boondBaseUrl = boondProxy ? boondProxy.replace(/\/$/, "") : "https://api.boondmanager.com";
+      const boondBaseUrl = boondProxy ? boondProxy.replace(/\/$/, "") : "https://ui.boondmanager.com";
       const res = await fetch(boondBaseUrl + "/api/candidates", {
         method: "POST",
-        headers: { "Content-Type": "application/vnd.api+json", "X-Boond-Token": boondToken, "X-Boond-Key": boondKey },
+        headers: { "Content-Type": "application/vnd.api+json", "Authorization": "Bearer " + jwt },
         body: JSON.stringify(body),
       });
       if (!res.ok) { const errData = await res.json().catch(() => ({})); throw new Error(errData.errors?.[0]?.detail || errData.message || `Erreur ${res.status}`); }
@@ -473,11 +488,12 @@ INSTRUCTIONS:
             </div>
             <div style={{ flex: 1, minWidth: 200 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: NABBOO_BLUE, marginBottom: 8 }}>📊 Boond</div>
-              <input type="password" value={boondToken} onChange={e => updateConfig("boondToken", e.target.value, setBoondToken)} placeholder="Token (client:user)" style={{ ...inputStyle, fontSize: 12, padding: "8px 12px", marginBottom: 4 }} />
-              <input type="password" value={boondKey} onChange={e => updateConfig("boondKey", e.target.value, setBoondKey)} placeholder="Clé client" style={{ ...inputStyle, fontSize: 12, padding: "8px 12px", marginBottom: 4 }} />
+              <input type="password" value={boondClientToken} onChange={e => updateConfig("boondClientToken", e.target.value, setBoondClientToken)} placeholder="Client Token" style={{ ...inputStyle, fontSize: 12, padding: "8px 12px", marginBottom: 4 }} />
+              <input type="password" value={boondClientKey} onChange={e => updateConfig("boondClientKey", e.target.value, setBoondClientKey)} placeholder="Client Key" style={{ ...inputStyle, fontSize: 12, padding: "8px 12px", marginBottom: 4 }} />
+              <input type="password" value={boondUserToken} onChange={e => updateConfig("boondUserToken", e.target.value, setBoondUserToken)} placeholder="User Token" style={{ ...inputStyle, fontSize: 12, padding: "8px 12px", marginBottom: 4 }} />
               <input type="text" value={claudeCarreId} onChange={e => updateConfig("claudeCarreId", e.target.value, setClaudeCarreId)} placeholder="ID Manager (8982)" style={{ ...inputStyle, fontSize: 12, padding: "8px 12px", marginBottom: 4 }} />
               <input type="text" value={boondProxy} onChange={e => updateConfig("boondProxy", e.target.value, setBoondProxy)} placeholder="Proxy URL (ex: https://boond-proxy.xxx.workers.dev)" style={{ ...inputStyle, fontSize: 12, padding: "8px 12px" }} />
-              <div style={{ fontSize: 11, color: boondToken && boondKey ? (boondProxy ? "#22a55b" : "#f39c12") : MUTED, marginTop: 4, fontWeight: 600 }}>{boondToken && boondKey ? (boondProxy ? "✅ Proxy actif" : "⚠️ Proxy requis (CORS)") : "Optionnel"}</div>
+              <div style={{ fontSize: 11, color: boondClientToken && boondClientKey && boondUserToken ? (boondProxy ? "#22a55b" : "#f39c12") : MUTED, marginTop: 4, fontWeight: 600 }}>{boondClientToken && boondClientKey && boondUserToken ? (boondProxy ? "✅ Proxy actif" : "⚠️ Proxy requis (CORS)") : "Optionnel"}</div>
             </div>
             <div style={{ flex: 1, minWidth: 200 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: NABBOO_BLUE, marginBottom: 8 }}>✉️ Signature</div>
