@@ -194,8 +194,10 @@ function NabbooMatcher() {
       const csvRes = await fetch(csvUrl);
       if (!csvRes.ok) throw new Error(`CSV inaccessible (${csvRes.status})`);
       const csvText = await csvRes.text();
-      const p = parseCSVText(csvText);
-      console.log("v6 profiles:", p.length);
+      const allProfiles = parseCSVText(csvText);
+      // Filter to only profiles from THIS search query
+      const p = allProfiles.filter(pr => !pr.query || pr.query === searchUrl || decodeURIComponent(pr.query) === decodeURIComponent(searchUrl));
+      console.log("v6 profiles:", p.length, "/ total:", allProfiles.length, "query filter:", searchUrl);
       if (p.length > 0) { setProfiles(p); setProgress(100); setPbStatus(`${p.length} profils !`); setTimeout(() => setStep(2), 1000); return; }
       throw new Error("CSV vide. Réessayez avec d'autres mots-clés.");
     } catch (err) {
@@ -422,7 +424,7 @@ INSTRUCTIONS:
           <div style={{ width: 36, height: 36, borderRadius: 8, background: `linear-gradient(135deg, ${ACCENT}, #d4782e)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, fontWeight: 700, color: "#fff" }}>N</div>
           <div>
             <div style={{ color: "#fff", fontSize: 16, fontWeight: 700 }}>ClaudeBoost</div>
-            <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 10 }}>Le NABBOOST ... de Claude — v6</div>
+            <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 10 }}>Le NABBOOST ... de Claude — v7</div>
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
