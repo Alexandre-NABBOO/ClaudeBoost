@@ -141,10 +141,12 @@ function NabbooMatcher() {
 
   const launchPhantomBuster = async () => {
     if (!pbApiKey) { setError("Configurez votre clé API PhantomBuster (⚙️)"); return; }
+    if (!linkedinCookie) { setError("Configurez votre cookie LinkedIn li_at (⚙️)"); setShowConfig(true); return; }
     setStep(1.5); setPbStatus("Lancement..."); setProgress(10); setError("");
     try {
       const searchUrl = buildLinkedInSearchURL(criteria);
       const pbArgument = {
+        sessionCookie: linkedinCookie,
         searchType: "linkedInSearchUrl",
         linkedInSearchUrl: searchUrl,
         category: "People",
@@ -439,8 +441,9 @@ INSTRUCTIONS:
             </div>
             <div style={{ flex: 1, minWidth: 200 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: NABBOO_BLUE, marginBottom: 8 }}>🔑 PhantomBuster</div>
-              <input type="password" value={pbApiKey} onChange={e => updateConfig("pbApiKey", e.target.value, setPbApiKey)} placeholder="Clé API PhantomBuster" style={{ ...inputStyle, fontSize: 12, padding: "8px 12px" }} />
-              <div style={{ fontSize: 11, color: pbApiKey ? "#22a55b" : MUTED, marginTop: 4, fontWeight: 600 }}>{pbApiKey ? "✅ Prêt" : "Optionnel"}</div>
+              <input type="password" value={pbApiKey} onChange={e => updateConfig("pbApiKey", e.target.value, setPbApiKey)} placeholder="Clé API PhantomBuster" style={{ ...inputStyle, fontSize: 12, padding: "8px 12px", marginBottom: 4 }} />
+              <input type="password" value={linkedinCookie} onChange={e => updateConfig("linkedinCookie", e.target.value, setLinkedinCookie)} placeholder="Cookie LinkedIn (li_at)" style={{ ...inputStyle, fontSize: 12, padding: "8px 12px" }} />
+              <div style={{ fontSize: 11, color: pbApiKey && linkedinCookie ? "#22a55b" : pbApiKey ? "#f39c12" : MUTED, marginTop: 4, fontWeight: 600 }}>{pbApiKey && linkedinCookie ? "✅ Prêt" : pbApiKey ? "⚠️ Cookie li_at requis" : "Optionnel"}</div>
             </div>
             <div style={{ flex: 1, minWidth: 200 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: NABBOO_BLUE, marginBottom: 8 }}>📱 Kaspr</div>
