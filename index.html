@@ -191,29 +191,24 @@ function NabbooMatcher() {
       }
       if (!done) throw new Error("PhantomBuster timeout. Téléchargez le CSV depuis PhantomBuster.");
       setPbStatus("Récupération des résultats..."); setProgress(75);
-      // Get output log which contains the CSV URL
-      const o = await fetch(`https://api.phantombuster.com/api/v2/agents/fetch-output?id=7681967140145623`, { headers: { "X-Phantombuster-Key": pbApiKey } });
-      if (o.ok) {
-        const d = await o.json();
-        console.log("fetch-output status:", o.status, "keys:", Object.keys(d));
-        // Extract CSV URL from output log
-        const csvMatch = d.output?.match(/https:\/\/phantombuster\.s3\.amazonaws\.com\/[^\s"]+\/result\.csv/);
-        const jsonMatch = d.output?.match(/https:\/\/phantombuster\.s3\.amazonaws\.com\/[^\s"]+\/result\.json/);
-        console.log("CSV URL:", csvMatch?.[0], "JSON URL:", jsonMatch?.[0]);
-        if (csvMatch) {
-          try {
-            const t = await (await fetch(csvMatch[0])).text();
-            const p = parseCSVText(t);
-            if (p.length > 0) { setProfiles(p); setProgress(100); setPbStatus(`${p.length} profils trouvés !`); setTimeout(() => setStep(2), 1000); return; }
-          } catch(e) { console.log("CSV fetch error:", e); }
-        }
-        // Fallback: try JSON
-        if (jsonMatch) {
-          try {
-            const j = await (await fetch(jsonMatch[0])).json();
-            if (Array.isArray(j) && j.length > 0) { setProfiles(j); setProgress(100); setPbStatus(`${j.length} profils trouvés !`); setTimeout(() => setStep(2), 1000); return; }
-          } catch(e) { console.log("JSON fetch error:", e); }
-        }
+      // Get agent config to build S3 URL
+      const agentInfo = await fetch(`https://api.phantombuster.com/api/v2/agents/fetch?id=7681967140145623`, { headers: { "X-Phantombuster-Key": pbApiKey } });
+      if (agentInfo.ok) {
+        const ai = await agentInfo.json();
+        const csvUrl = `https://phantombuster.s3.amazonaws.com/${ai.orgS3Folder}/${ai.s3Folder}/result.csv`;
+        const jsonUrl = `https://phantombuster.s3.amazonaws.com/${ai.orgS3Folder}/${ai.s3Folder}/result.json`;
+        console.log("CSV URL:", csvUrl);
+        // Try CSV first
+        try {
+          const t = await (await fetch(csvUrl)).text();
+          const p = parseCSVText(t);
+          if (p.length > 0) { setProfiles(p); setProgress(100); setPbStatus(`${p.length} profils trouvés !`); setTimeout(() => setStep(2), 1000); return; }
+        } catch(e) { console.log("CSV fetch error:", e); }
+        // Fallback: JSON
+        try {
+          const j = await (await fetch(jsonUrl)).json();
+          if (Array.isArray(j) && j.length > 0) { setProfiles(j); setProgress(100); setPbStatus(`${j.length} profils trouvés !`); setTimeout(() => setStep(2), 1000); return; }
+        } catch(e) { console.log("JSON fetch error:", e); }
       }
       throw new Error("Résultats non trouvés. Téléchargez le CSV depuis PhantomBuster.");
     } catch (err) {
