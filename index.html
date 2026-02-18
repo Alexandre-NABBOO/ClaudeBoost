@@ -99,6 +99,7 @@ function NabbooMatcher() {
   const [kasprKey, setKasprKey] = useState(saved.kasprKey || "");
   const [boondToken, setBoondToken] = useState(saved.boondToken || "");
   const [boondKey, setBoondKey] = useState(saved.boondKey || "");
+  const [boondProxy, setBoondProxy] = useState(saved.boondProxy || "");
   const [recruiterName, setRecruiterName] = useState(saved.recruiterName || "");
   const [recruiterTitle, setRecruiterTitle] = useState(saved.recruiterTitle || "");
   const [claudeCarreId, setClaudeCarreId] = useState(saved.claudeCarreId || "8982");
@@ -402,7 +403,8 @@ INSTRUCTIONS:
           }
         }
       };
-      const res = await fetch("https://api.boondmanager.com/api/candidates", {
+      const boondBaseUrl = boondProxy ? boondProxy.replace(/\/$/, "") : "https://api.boondmanager.com";
+      const res = await fetch(boondBaseUrl + "/api/candidates", {
         method: "POST",
         headers: { "Content-Type": "application/vnd.api+json", "X-Boond-Token": boondToken, "X-Boond-Key": boondKey },
         body: JSON.stringify(body),
@@ -412,7 +414,10 @@ INSTRUCTIONS:
       setBoondStatus("success");
       profile._boondId = data.data?.id;
     } catch (err) {
-      if (err.message.includes("fetch") || err.message.includes("CORS")) setBoondStatus("cors");
+      if (err.message.includes("fetch") || err.message.includes("CORS")) {
+        if (!boondProxy) setBoondStatus("cors");
+        else setBoondStatus("error:Proxy inaccessible — vérifiez l'URL du Worker Cloudflare");
+      }
       else setBoondStatus("error:" + err.message);
     }
   };
@@ -438,7 +443,7 @@ INSTRUCTIONS:
           <div style={{ width: 36, height: 36, borderRadius: 8, background: `linear-gradient(135deg, ${ACCENT}, #d4782e)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, fontWeight: 700, color: "#fff" }}>N</div>
           <div>
             <div style={{ color: "#fff", fontSize: 16, fontWeight: 700 }}>ClaudeBoost</div>
-            <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 10 }}>Le NABBOOST ... de Claude — v8</div>
+            <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 10 }}>Le NABBOOST ... de Claude — v9</div>
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -470,8 +475,9 @@ INSTRUCTIONS:
               <div style={{ fontSize: 13, fontWeight: 600, color: NABBOO_BLUE, marginBottom: 8 }}>📊 Boond</div>
               <input type="password" value={boondToken} onChange={e => updateConfig("boondToken", e.target.value, setBoondToken)} placeholder="Token (client:user)" style={{ ...inputStyle, fontSize: 12, padding: "8px 12px", marginBottom: 4 }} />
               <input type="password" value={boondKey} onChange={e => updateConfig("boondKey", e.target.value, setBoondKey)} placeholder="Clé client" style={{ ...inputStyle, fontSize: 12, padding: "8px 12px", marginBottom: 4 }} />
-              <input type="text" value={claudeCarreId} onChange={e => updateConfig("claudeCarreId", e.target.value, setClaudeCarreId)} placeholder="ID Manager (8982)" style={{ ...inputStyle, fontSize: 12, padding: "8px 12px" }} />
-              <div style={{ fontSize: 11, color: boondToken && boondKey ? "#22a55b" : MUTED, marginTop: 4, fontWeight: 600 }}>{boondToken && boondKey ? "✅" : "Optionnel"}</div>
+              <input type="text" value={claudeCarreId} onChange={e => updateConfig("claudeCarreId", e.target.value, setClaudeCarreId)} placeholder="ID Manager (8982)" style={{ ...inputStyle, fontSize: 12, padding: "8px 12px", marginBottom: 4 }} />
+              <input type="text" value={boondProxy} onChange={e => updateConfig("boondProxy", e.target.value, setBoondProxy)} placeholder="Proxy URL (ex: https://boond-proxy.xxx.workers.dev)" style={{ ...inputStyle, fontSize: 12, padding: "8px 12px" }} />
+              <div style={{ fontSize: 11, color: boondToken && boondKey ? (boondProxy ? "#22a55b" : "#f39c12") : MUTED, marginTop: 4, fontWeight: 600 }}>{boondToken && boondKey ? (boondProxy ? "✅ Proxy actif" : "⚠️ Proxy requis (CORS)") : "Optionnel"}</div>
             </div>
             <div style={{ flex: 1, minWidth: 200 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: NABBOO_BLUE, marginBottom: 8 }}>✉️ Signature</div>
