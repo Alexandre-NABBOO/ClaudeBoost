@@ -82,14 +82,14 @@ function saveSession(data) {
 
 // --- JWT HMAC-SHA256 for Boond API ---
 async function buildBoondJWT(clientToken, clientKey, userToken) {
-  const header = btoa(JSON.stringify({ alg: "HS256", typ: "JWT" })).replace(/=/g, "");
+  const header = btoa(JSON.stringify({ alg: "HS256", type: "JWT" }));
   const now = Math.floor(Date.now() / 1000);
-  const payload = btoa(JSON.stringify({ clientToken, userToken, iat: now, exp: now + 300 })).replace(/=/g, "");
+  const payload = btoa(JSON.stringify({ userToken, clientToken, time: now, mode: "normal" }));
   const data = header + "." + payload;
   const keyBytes = new TextEncoder().encode(clientKey);
   const cryptoKey = await crypto.subtle.importKey("raw", keyBytes, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   const sig = await crypto.subtle.sign("HMAC", cryptoKey, new TextEncoder().encode(data));
-  const sigB64 = btoa(String.fromCharCode(...new Uint8Array(sig))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+  const sigB64 = btoa(String.fromCharCode(...new Uint8Array(sig)));
   return data + "." + sigB64;
 }
 
@@ -458,7 +458,7 @@ INSTRUCTIONS:
           <div style={{ width: 36, height: 36, borderRadius: 8, background: `linear-gradient(135deg, ${ACCENT}, #d4782e)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, fontWeight: 700, color: "#fff" }}>N</div>
           <div>
             <div style={{ color: "#fff", fontSize: 16, fontWeight: 700 }}>ClaudeBoost</div>
-            <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 10 }}>Le NABBOOST ... de Claude — v11</div>
+            <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 10 }}>Le NABBOOST ... de Claude — v12</div>
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
