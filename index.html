@@ -141,79 +141,65 @@ function NabbooMatcher() {
 
   const launchPhantomBuster = async () => {
     if (!pbApiKey) { setError("Configurez votre clé API PhantomBuster (⚙️)"); return; }
-    setStep(1.5); setPbStatus("Lancement..."); setProgress(10); setError("");
+    setStep(1.5); setPbStatus("Vérification..."); setProgress(5); setError("");
     try {
       const searchUrl = buildLinkedInSearchURL(criteria);
-      // Step 1: Fetch current phantom config (includes session cookie)
-      const fetchRes = await fetch("https://api.phantombuster.com/api/v2/agents/fetch?id=7681967140145623", {
-        headers: { "X-Phantombuster-Key": pbApiKey },
-      });
-      if (!fetchRes.ok) throw new Error("Impossible de récupérer la config du phantom");
+      // Step 0: Check if already running
+      const checkRes = await fetch("https://api.phantombuster.com/api/v2/agents/fetch-output?id=7681967140145623", { headers: { "X-Phantombuster-Key": pbApiKey } });
+      if (checkRes.ok) { const cd = await checkRes.json(); if (cd.isAgentRunning) { setError("⏳ Phantom déjà en cours. Attendez quelques minutes."); setStep(1); return; } }
+      // Step 1: Get current config + S3 info
+      setPbStatus("Préparation..."); setProgress(8);
+      const fetchRes = await fetch("https://api.phantombuster.com/api/v2/agents/fetch?id=7681967140145623", { headers: { "X-Phantombuster-Key": pbApiKey } });
+      if (!fetchRes.ok) throw new Error("Config phantom inaccessible");
       const agentData = await fetchRes.json();
       const currentArg = typeof agentData.argument === "string" ? JSON.parse(agentData.argument) : (agentData.argument || {});
-      setPbStatus("Configuration récupérée..."); setProgress(12);
-      // Step 2: Merge only the search URL into existing config (keeps cookie!)
+      const orgS3 = agentData.orgS3Folder;
+      const s3 = agentData.s3Folder;
+      console.log("v6 init:", { orgS3, s3, argKeys: Object.keys(currentArg) });
+      // Step 2: Save merged config
+      setPbStatus("Configuration..."); setProgress(12);
       const mergedArg = { ...currentArg, linkedInSearchUrl: searchUrl, searchType: "linkedInSearchUrl", category: "People", numberOfResultsPerLaunch: 100, numberOfResultsPerSearch: 100 };
       const saveRes = await fetch("https://api.phantombuster.com/api/v2/agents/save", {
         method: "POST", headers: { "Content-Type": "application/json", "X-Phantombuster-Key": pbApiKey },
         body: JSON.stringify({ id: "7681967140145623", argument: mergedArg }),
       });
-      if (!saveRes.ok) { const err = await saveRes.json().catch(() => ({})); throw new Error(`Save échoué: ${JSON.stringify(err)}`); }
-      setPbStatus("Config mise à jour, lancement..."); setProgress(18);
-      // Step 3: Launch without arguments (uses saved config with cookie intact)
+      if (!saveRes.ok) throw new Error("Save config échoué");
+      // Step 3: Launch
+      setPbStatus("Lancement..."); setProgress(18);
       const r = await fetch("https://api.phantombuster.com/api/v2/agents/launch", {
         method: "POST", headers: { "Content-Type": "application/json", "X-Phantombuster-Key": pbApiKey },
         body: JSON.stringify({ id: "7681967140145623" }),
       });
-      const rBody = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(`PB ${r.status}: ${JSON.stringify(rBody)}`);
-      const containerId = rBody.containerId;
+      if (!r.ok) {
+        if (r.status === 429) { setError("⏳ Phantom déjà en cours. Attendez quelques minutes."); setStep(1); return; }
+        const rb = await r.json().catch(() => ({})); throw new Error(`PB ${r.status}: ${JSON.stringify(rb)}`);
+      }
+      console.log("v6 launched OK");
+      // Step 4: Poll using isAgentRunning
       setPbStatus("Recherche LinkedIn..."); setProgress(25);
-      let att = 0, done = false, started = false;
-      while (att < 80 && !done) {
+      let att = 0, done = false;
+      while (att < 120 && !done) {
         await new Promise(r => setTimeout(r, 10000)); att++;
-        setProgress(25 + Math.min(55, att * 3)); setPbStatus(started ? `Extraction... (${att * 10}s)` : `Démarrage... (${att * 10}s)`);
-        const s = await fetch(`https://api.phantombuster.com/api/v2/agents/fetch?id=7681967140145623`, { headers: { "X-Phantombuster-Key": pbApiKey } });
-        if (s.ok) {
-          const d = await s.json();
-          console.log("PB poll:", { lastEndType: d.lastEndType, launchType: d.launchType, started });
-          if (!started) {
-            // Phase 1: wait for phantom to start (lastEndType becomes null/undefined or changes)
-            if (!d.lastEndType || d.lastEndType === "running" || d.launchType === "api") started = true;
-            // If still "finished" after 30s, it may have run instantly — check if results changed
-            if (att >= 3 && d.lastEndType === "finished") { started = true; done = true; }
-          } else {
-            // Phase 2: wait for phantom to finish
-            if (d.lastEndType === "error") throw new Error("PhantomBuster erreur");
-            if (d.lastEndType === "finished" || d.lastEndType === "success") done = true;
-          }
-        }
-      }
-      if (!done) throw new Error("PhantomBuster timeout. Téléchargez le CSV depuis PhantomBuster.");
-      setPbStatus("Récupération des résultats..."); setProgress(75);
-      // Get agent config to build S3 URL
-      const agentInfo = await fetch(`https://api.phantombuster.com/api/v2/agents/fetch?id=7681967140145623`, { headers: { "X-Phantombuster-Key": pbApiKey } });
-      if (agentInfo.ok) {
-        const ai = await agentInfo.json();
-        const csvUrl = `https://phantombuster.s3.amazonaws.com/${ai.orgS3Folder}/${ai.s3Folder}/result.csv`;
-        const jsonUrl = `https://phantombuster.s3.amazonaws.com/${ai.orgS3Folder}/${ai.s3Folder}/result.json`;
-        console.log("CSV URL:", csvUrl);
-        // Try CSV first
+        setProgress(25 + Math.min(55, att * 2)); setPbStatus(`Extraction... (${att * 10}s)`);
         try {
-          const t = await (await fetch(csvUrl)).text();
-          const p = parseCSVText(t);
-          if (p.length > 0) { setProfiles(p); setProgress(100); setPbStatus(`${p.length} profils trouvés !`); setTimeout(() => setStep(2), 1000); return; }
-        } catch(e) { console.log("CSV fetch error:", e); }
-        // Fallback: JSON
-        try {
-          const j = await (await fetch(jsonUrl)).json();
-          if (Array.isArray(j) && j.length > 0) { setProfiles(j); setProgress(100); setPbStatus(`${j.length} profils trouvés !`); setTimeout(() => setStep(2), 1000); return; }
-        } catch(e) { console.log("JSON fetch error:", e); }
+          const s = await fetch("https://api.phantombuster.com/api/v2/agents/fetch-output?id=7681967140145623", { headers: { "X-Phantombuster-Key": pbApiKey } });
+          if (s.ok) { const d = await s.json(); console.log("v6 poll:", att, "running:", d.isAgentRunning, "status:", d.status); if (!d.isAgentRunning && att >= 2) done = true; }
+        } catch(e) { console.log("v6 poll err:", e); }
       }
-      throw new Error("Résultats non trouvés. Téléchargez le CSV depuis PhantomBuster.");
+      if (!done) throw new Error("Timeout. Téléchargez le CSV depuis PhantomBuster.");
+      // Step 5: Fetch CSV from S3
+      setPbStatus("Récupération..."); setProgress(85);
+      const csvUrl = `https://phantombuster.s3.amazonaws.com/${orgS3}/${s3}/result.csv`;
+      console.log("v6 fetching CSV:", csvUrl);
+      const csvRes = await fetch(csvUrl);
+      if (!csvRes.ok) throw new Error(`CSV inaccessible (${csvRes.status})`);
+      const csvText = await csvRes.text();
+      const p = parseCSVText(csvText);
+      console.log("v6 profiles:", p.length);
+      if (p.length > 0) { setProfiles(p); setProgress(100); setPbStatus(`${p.length} profils !`); setTimeout(() => setStep(2), 1000); return; }
+      throw new Error("CSV vide. Réessayez avec d'autres mots-clés.");
     } catch (err) {
-      setError(err.message.includes("NetworkError") ? "Erreur réseau — vérifiez votre connexion." : "Erreur: " + err.message);
-      setPbStatus(""); setStep(1);
+      if (step === 1.5) { setError("Erreur: " + err.message); setPbStatus(""); setStep(1); }
     }
   };
 
@@ -436,7 +422,7 @@ INSTRUCTIONS:
           <div style={{ width: 36, height: 36, borderRadius: 8, background: `linear-gradient(135deg, ${ACCENT}, #d4782e)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, fontWeight: 700, color: "#fff" }}>N</div>
           <div>
             <div style={{ color: "#fff", fontSize: 16, fontWeight: 700 }}>ClaudeBoost</div>
-            <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 10 }}>Le NABBOOST ... de Claude</div>
+            <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 10 }}>Le NABBOOST ... de Claude — v6</div>
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
