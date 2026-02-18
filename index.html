@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nabboo Matcher — Pipeline de sourcing intelligent</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎯</text></svg>" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'DM Sans', 'Segoe UI', sans-serif; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.1); } }
+    input:focus, textarea:focus { border-color: #e8963e !important; box-shadow: 0 0 0 3px rgba(232,150,62,0.1); }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+const { useState, useCallback, useRef } = React;
+
+const NABBOO_BLUE = "#1a2744";
+const ACCENT = "#e8963e";
+const LIGHT_BG = "#f7f5f0";
+const CARD_BG = "#ffffff";
+const MUTED = "#8a8a8a";
+
+function* csvParser(text) {
+  let row = [], field = "", inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '"') { if (inQuotes && text[i+1] === '"') { field += '"'; i++; } else inQuotes = !inQuotes; }
+    else if (ch === "," && !inQuotes) { row.push(field); field = ""; }
+    else if ((ch === "\n" || ch === "\r") && !inQuotes) { row.push(field); field = ""; if (row.some(f => f.trim())) yield row; row = []; if (ch === "\r" && text[i+1] === "\n") i++; }
+    else field += ch;
+  }
+  row.push(field); if (row.some(f => f.trim())) yield row;
+}
+
+function parseCSVText(text) {
+  const rows = [...csvParser(text)];
+  if (rows.length < 2) return [];
+  const headers = rows[0];
+  return rows.slice(1).map(row => {
+    const obj = {}; headers.forEach((h, i) => { obj[h.trim()] = (row[i] || "").trim(); }); return obj;
+  }).filter(r => r.fullName && !r.fullName.startsWith("Export limit") && !r.fullName.startsWith("Upgrade"));
+}
+
+const subsidiaries = [
+  { id: "vacoa", name: "Vacoa", desc: "Conception & études méca/élec", emoji: "🌱" },
+  { id: "navys", name: "Navys", desc: "Construction, essais & maintenance", emoji: "⚛️" },
+  { id: "ginko", name: "Ginko", desc: "Contrôle-commande", emoji: "🔧" },
+];
+const sectors = ["Nucléaire", "Défense", "Spatial", "Énergie", "Industrie", "Aéronautique"];
+const defaultCriteria = { subsidiary: "", jobTitle: "", skills: "", location: "", sectors: [], experience: "any", description: "", habilitable: false };
+
+function buildLinkedInSearchURL(c) {
+  let kw = c.jobTitle || "";
+  if (c.skills) kw += " " + c.skills;
+  return `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(kw.trim())}&origin=GLOBAL_SEARCH_HEADER`;
+}
+
+// --- CONFIGURATION STORAGE ---
+function loadConfig() {
+  try {
+    return JSON.parse(localStorage.getItem("nabboo-config") || "{}");
+  } catch { return {}; }
+}
+function saveConfigLS(cfg) {
+  try { localStorage.setItem("nabboo-config", JSON.stringify(cfg)); } catch {}
+}
+
+function NabbooMatcher() {
+  const saved = loadConfig();
+  const [step, setStep] = useState(0);
+  const [profiles, setProfiles] = useState([]);
+  const [criteria, setCriteria] = useState(defaultCriteria);
+  const [results, setResults] = useState([]);
+  const [progress, setProgress] = useState(0);
+  const [progressMsg, setProgressMsg] = useState("");
+  const [error, setError] = useState("");
+  const [expandedId, setExpandedId] = useState(null);
+  const [dragOver, setDragOver] = useState(false);
+  const [showConfig, setShowConfig] = useState(false);
+  const [pbApiKey, setPbApiKey] = useState(saved.pbApiKey || "");
+  const [pbStatus, setPbStatus] = useState("");
+  const [kasprKey, setKasprKey] = useState(saved.kasprKey || "");
+  const [boondToken, setBoondToken] = useState(saved.boondToken || "");
+  const [boondKey, setBoondKey] = useState(saved.boondKey || "");
+  const [recruiterName, setRecruiterName] = useState(saved.recruiterName || "");
+  const [recruiterTitle, setRecruiterTitle] = useState(saved.recruiterTitle || "");
+  const [claudeCarreId, setClaudeCarreId] = useState(saved.claudeCarreId || "8982");
+  const [claudeApiKey, setClaudeApiKey] = useState(saved.claudeApiKey || "");
+  const [inmailProfile, setInmailProfile] = useState(null);
+  const [inmailText, setInmailText] = useState("");
+  const [inmailLoading, setInmailLoading] = useState(false);
+  const [inmailCopied, setInmailCopied] = useState(false);
+  const [boondModal, setBoondModal] = useState(null);
+  const [boondStatus, setBoondStatus] = useState("");
+  const fileInputRef = useRef(null);
+
+  const boondTitles = [
+    "Dessinateur / Projeteur", "Concepteur mécanique", "Ingénieur Electrique", "Concepteur Electronique",
+    "Pilote d'étude", "Ingénieur Système / Produit", "Ingénieur calcul", "Ingénieur Procédé",
+    "Installation Générale", "Projeteur I&C", "Ingénieur I&C", "Technicien méthodes",
+    "Ingénieur Méthodes / Indus", "Responsable méthode / indus", "Ingénieur essai / validation",
+    "PMO", "Chef de projet", "Planificateur", "Acheteur", "Contract Manager",
+    "Ingénieur Qualité", "Ingénieur Supply Chain", "Radioprotection"
+  ];
+
+  // Persist config on change
+  const updateConfig = (key, val, setter) => {
+    setter(val);
+    const cfg = loadConfig();
+    cfg[key] = val;
+    saveConfigLS(cfg);
+  };
+
+  const handleFile = useCallback((file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const parsed = parseCSVText(e.target.result);
+        if (parsed.length === 0) { setError("Aucun profil trouvé."); return; }
+        setProfiles(parsed); setError(""); setStep(2);
+      } catch (err) { setError("Erreur: " + err.message); }
+    };
+    reader.readAsText(file);
+  }, []);
+
+  const handleDrop = useCallback((e) => {
+    e.preventDefault(); setDragOver(false);
+    const file = e.dataTransfer.files[0];
+    if (file?.name.endsWith(".csv")) handleFile(file); else setError("Fichier CSV requis.");
+  }, [handleFile]);
+
+  const launchPhantomBuster = async () => {
+    if (!pbApiKey) { setError("Configurez votre clé API PhantomBuster (⚙️)"); return; }
+    setStep(1.5); setPbStatus("Lancement..."); setProgress(10); setError("");
+    try {
+      const r = await fetch("https://api.phantombuster.com/api/v2/agents/launch", {
+        method: "POST", headers: { "Content-Type": "application/json", "X-Phantombuster-Key": pbApiKey },
+        body: JSON.stringify({ id: "7681967140145623", argument: { searches: buildLinkedInSearchURL(criteria), numberOfResultsPerSearch: 100 } }),
+      });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `Erreur ${r.status}`);
+      setPbStatus("Recherche LinkedIn..."); setProgress(25);
+      let att = 0, done = false;
+      while (att < 40 && !done) {
+        await new Promise(r => setTimeout(r, 15000)); att++;
+        setProgress(25 + Math.min(45, att * 3)); setPbStatus(`Extraction... (${att * 15}s)`);
+        const s = await fetch(`https://api.phantombuster.com/api/v2/agents/fetch?id=7681967140145623`, { headers: { "X-Phantombuster-Key": pbApiKey } });
+        if (s.ok) { const d = await s.json(); if (d.s3Status === "available" || d.lastEndMessage) done = true; }
+      }
+      if (!done) throw new Error("Trop long. Téléchargez le CSV.");
+      setPbStatus("Récupération..."); setProgress(75);
+      const o = await fetch(`https://api.phantombuster.com/api/v2/agents/fetch-output?id=7681967140145623`, { headers: { "X-Phantombuster-Key": pbApiKey } });
+      if (o.ok) { const d = await o.json(); if (d.resultObject) { const t = await (await fetch(d.resultObject)).text(); const p = parseCSVText(t); if (p.length > 0) { setProfiles(p); setProgress(100); setTimeout(() => setStep(2), 1000); return; } } }
+      throw new Error("Téléchargez le CSV depuis PhantomBuster.");
+    } catch (err) {
+      setError(err.message.includes("fetch") || err.message.includes("CORS") ? "Restriction navigateur — importez le CSV manuellement." : "Erreur: " + err.message);
+      setPbStatus(""); setStep(1);
+    }
+  };
+
+  const fetchPhone = async (profile, idx) => {
+    if (!kasprKey) { setError("Configurez votre clé API Kaspr (⚙️)"); return; }
+    const linkedinUrl = profile.linkedinProfileUrl || profile.profileUrl || "";
+    if (!linkedinUrl) return;
+    const linkedinId = linkedinUrl.replace(/\/$/, "").split("/").pop();
+    if (!linkedinId) return;
+    setResults(prev => prev.map((r, i) => i === idx ? { ...r, _phoneLoading: true } : r));
+    try {
+      const res = await fetch("https://api.developers.kaspr.io/profile/linkedin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": kasprKey, "accept-version": "v2.0" },
+        body: JSON.stringify({ name: profile.fullName || "", id: linkedinId }),
+      });
+      if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.message || `Erreur ${res.status}`); }
+      const data = await res.json();
+      const phones = data.phone || data.phones || [];
+      const phone = Array.isArray(phones) && phones.length > 0 ? (phones[0].phone || phones[0].number || phones[0]) : (data.phoneNumber || data.mobilePhone || "");
+      const email = data.email || data.workEmail || "";
+      const directEmail = data.directEmail || data.personalEmail || "";
+      setResults(prev => prev.map((r, i) => i === idx ? { ...r, phoneNumber: phone || "Non trouvé", kasprEmail: email || undefined, kasprDirectEmail: directEmail || undefined, _phoneLoading: false } : r));
+    } catch (err) {
+      const msg = (err.message.includes("fetch") || err.message.includes("CORS") || err.message.includes("NetworkError")) ? "CORS — rechargez la page ou vérifiez votre plan Kaspr" : err.message;
+      setResults(prev => prev.map((r, i) => i === idx ? { ...r, phoneNumber: "❌ " + msg, _phoneLoading: false } : r));
+    }
+  };
+
+  const runAnalysis = async () => {
+    if (!claudeApiKey) { setError("Configurez votre clé API Claude (⚙️)"); setShowConfig(true); return; }
+    setStep(3); setProgress(0); setProgressMsg("Préparation...");
+    const summaries = profiles.map((p, i) =>
+      `Profil ${i+1}: ${p.fullName}\nTitre: ${p.headline || p.jobTitle || "N/A"}\nEntreprise: ${p.company || "N/A"} (${p.industry || "N/A"})\nPoste: ${p.jobTitle || "N/A"} (${p.jobDateRange || ""})\nPrécédent: ${p.jobTitle2 || "N/A"} chez ${p.company2 || "N/A"} (${p.jobDateRange2 || ""})\nLocalisation: ${p.location || "N/A"}\nFormation: ${p.school || "N/A"} - ${p.schoolDegree || "N/A"} (${p.schoolDateRange || ""})\nFormation2: ${p.school2 || "N/A"} - ${p.schoolDegree2 || "N/A"} (${p.schoolDateRange2 || ""})\nInfo: ${p.additionalInfo || "Aucune"}`
+    ).join("\n---\n");
+    const hab = criteria.habilitable ? `\n\nCRITÈRE HABILITABILITÉ ACTIVÉ: Poste nécessitant habilitation défense/nucléaire française. Seuls les profils avec un parcours suggérant fortement la nationalité française sont éligibles (études en France, entreprises françaises). Un nom d'origine étrangère avec parcours 100% français = éligible. Parcours principalement à l'étranger = non éligible (score 0, mention "Non éligible - habilitation"). C'est ÉLIMINATOIRE.` : "";
+    const sub = criteria.subsidiary ? subsidiaries.find(s => s.id === criteria.subsidiary)?.name || "Toutes" : "Toutes";
+    const prompt = `Expert recrutement groupe Nabboo, conseil ingénierie nucléaire/défense/spatial. 3 filiales: Vacoa (conception/études méca/élec), Navys (construction/essais/maintenance nucléaire), Ginko (contrôle-commande).
+
+Critères: Filiale: ${sub} | Poste: ${criteria.jobTitle || "?"} | Compétences: ${criteria.skills || "?"} | Localisation: ${criteria.location || "France"} | Secteurs: ${criteria.sectors.join(", ") || "Tous"} | Expérience: ${criteria.experience === "any" ? "Tout" : criteria.experience} | Besoin: ${criteria.description || "?"} | Habilitation: ${criteria.habilitable ? "OUI" : "NON"}${hab}
+
+${profiles.length} profils:\n${summaries}
+
+Réponds UNIQUEMENT JSON valide:
+[{"index":1,"score":85,"recommendation":"Excellent","reasoning":"2-3 phrases","suggestedSubsidiary":"Vacoa","keyStrengths":["x"],"concerns":["y"],"habilitableStatus":"${criteria.habilitable ? "eligible/non-eligible" : "non-requis"}","boondTitle":"titre le plus proche de la liste"}]
+
+IMPORTANT pour boondTitle: choisis le titre le PLUS PROCHE dans cette liste EXACTE (copie-le tel quel):
+${boondTitles.join(", ")}
+
+Score 0-100, exigeant. Trie meilleur→moins bon.`;
+
+    try {
+      setProgress(30); setProgressMsg("Claude analyse...");
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": claudeApiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+        body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 4000, messages: [{ role: "user", content: prompt }] }),
+      });
+      setProgress(70); setProgressMsg("Finalisation...");
+      const data = await res.json();
+      if (data.error) throw new Error(data.error.message);
+      const text = data.content.map(c => c.text || "").join("");
+      const m = text.match(/\[[\s\S]*\]/);
+      if (!m) throw new Error("Format inattendu");
+      const scored = JSON.parse(m[0]);
+      setResults(scored.map(s => { const p = profiles[s.index - 1]; return p ? { ...p, ...s } : null; }).filter(Boolean).sort((a, b) => b.score - a.score));
+      setProgress(100); setTimeout(() => setStep(4), 500);
+    } catch (err) { setError("Erreur: " + err.message); setStep(2); }
+  };
+
+  const generateInmail = async (profile) => {
+    if (!claudeApiKey) { setError("Configurez votre clé API Claude (⚙️)"); setShowConfig(true); return; }
+    setInmailProfile(profile); setInmailLoading(true); setInmailText(""); setInmailCopied(false);
+    const sub = criteria.subsidiary ? subsidiaries.find(s => s.id === criteria.subsidiary) : null;
+    const subName = sub ? sub.name : "Nabboo";
+    const sectorsList = criteria.sectors.length > 0 ? criteria.sectors.join(", ") : "nucléaire, défense, spatial";
+    const sigName = recruiterName || "Votre recruteur";
+    const sigTitle = recruiterTitle || `Chargé(e) de Ressources Humaines chez ${subName.toUpperCase()}`;
+
+    const prompt = `Tu rédiges un InMail LinkedIn pour un recruteur de ${subName} (groupe Nabboo, conseil en ingénierie).
+
+CANDIDAT:
+- Nom: ${profile.fullName}
+- Poste: ${profile.headline || profile.jobTitle} chez ${profile.company}
+- Précédent: ${profile.jobTitle2 || "N/A"} chez ${profile.company2 || "N/A"}
+- Localisation: ${profile.location}
+- Formation: ${profile.school} - ${profile.schoolDegree}
+
+BESOIN:
+- Poste: ${criteria.jobTitle}
+- Secteurs: ${sectorsList}
+- Localisation: ${criteria.location || "non précisée"}
+- Description: ${criteria.description || "Mission en ingénierie"}
+
+STYLE OBLIGATOIRE (respecte exactement ce ton):
+- Vouvoiement systématique
+- Ton professionnel mais chaleureux, PAS familier
+- Message court (80-120 mots max pour le corps)
+- Mentionner le secteur et la localisation de la mission
+- Terminer par proposition d'échange téléphonique de 10-15 minutes
+- PAS de phrases corporate creuses type "j'ai remarqué votre profil avec intérêt"
+- Peut utiliser quelques emojis sobres (🛡️ 📍 🤝 🚀 ⚛️)
+
+VOICI DES EXEMPLES DU STYLE ATTENDU:
+
+Exemple 1:
+OBJET: Opportunité en mécanique – Secteur défense
+---
+Bonjour [Prénom],
+
+Je me permets de vous contacter car je recrute actuellement pour un poste en mécanique, à pourvoir dans le secteur de la défense 🛡️, en Île-de-France 📍.
+
+Il s'agit d'un projet à fort enjeu technologique, dans un environnement stimulant et exigeant.
+
+Si vous êtes en veille ou curieux(se) d'en savoir plus, je serais ravie d'échanger avec vous ! 🤝
+
+Très belle journée à vous,
+
+${sigName}
+${sigTitle}
+
+Exemple 2:
+OBJET: Poste Ingénieur Mécanique | Spatial & Satellites
+---
+Bonjour,
+
+Je me permets de revenir vers vous concernant le poste d'Ingénieur(e) Mécanique pour des projets satellites au sud de Rennes.
+
+Si vous êtes intéressé(e), je serais ravie d'échanger rapidement pour vous présenter le contexte et les missions.
+
+Auriez-vous 10‑15 minutes cette semaine pour en discuter ?
+
+Très bonne journée,
+
+${sigName}
+${sigTitle}
+
+INSTRUCTIONS:
+- Rédige un InMail PERSONNALISÉ pour ce candidat spécifique
+- Adapte l'objet et le contenu au profil du candidat et au besoin
+- La signature doit TOUJOURS être: ${sigName} puis ${sigTitle}
+- Utilise le format OBJET: [objet]\\n---\\n[corps avec signature]
+- Ne mets PAS de guillemets autour du résultat`;
+
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": claudeApiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+        body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, messages: [{ role: "user", content: prompt }] }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error.message);
+      setInmailText(data.content.map(c => c.text || "").join(""));
+    } catch (err) { setInmailText("Erreur: " + err.message); }
+    setInmailLoading(false);
+  };
+
+  const addToBoond = async (profile) => {
+    if (!boondToken || !boondKey) { setError("Configurez vos identifiants Boond (⚙️)"); setShowConfig(true); return; }
+    setBoondModal(profile); setBoondStatus("creating");
+    try {
+      const names = (profile.fullName || "").split(" ");
+      const firstName = profile.firstName || names[0] || "";
+      const lastName = (profile.lastName || names.slice(1).join(" ") || "").toUpperCase();
+      const phoneNum = profile.phoneNumber || profile.phone || profile.personalPhone || "";
+      const emailAddr = profile.kasprEmail || profile.kasprDirectEmail || "";
+      const body = {
+        data: {
+          type: "candidate",
+          attributes: {
+            firstName, lastName, state: 1, typeOf: -1,
+            title: profile.boondTitle || "Concepteur mécanique",
+            sourceType: 6, source: "Sourcing LinkedIn",
+            phone1: phoneNum, email1: emailAddr, city: profile.location || "",
+            information: {
+              comments: `Source: Sourcing LinkedIn\nProfil: ${profile.linkedinProfileUrl || profile.profileUrl || ""}\nTitre LinkedIn: ${profile.headline || profile.jobTitle || ""}\nEntreprise: ${profile.company || ""}\nLocalisation: ${profile.location || ""}\nFormation: ${profile.school || ""} - ${profile.schoolDegree || ""}\n${phoneNum ? "Téléphone: " + phoneNum + "\n" : ""}${emailAddr ? "Email: " + emailAddr + "\n" : ""}Score Nabboo Matcher: ${profile.score || "N/A"}/100\nFiliale suggérée: ${profile.suggestedSubsidiary || "N/A"}\nDate import: ${new Date().toLocaleDateString("fr-FR")}`,
+            }
+          },
+          relationships: {
+            ...(claudeCarreId ? {
+              mainManager: { data: { id: String(claudeCarreId), type: "resource" } },
+              hrManager: { data: { id: String(claudeCarreId), type: "resource" } }
+            } : {})
+          }
+        }
+      };
+      const res = await fetch("https://api.boondmanager.com/api/candidates", {
+        method: "POST",
+        headers: { "Content-Type": "application/vnd.api+json", "X-Boond-Token": boondToken, "X-Boond-Key": boondKey },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) { const errData = await res.json().catch(() => ({})); throw new Error(errData.errors?.[0]?.detail || errData.message || `Erreur ${res.status}`); }
+      const data = await res.json();
+      setBoondStatus("success");
+      profile._boondId = data.data?.id;
+    } catch (err) {
+      if (err.message.includes("fetch") || err.message.includes("CORS")) setBoondStatus("cors");
+      else setBoondStatus("error:" + err.message);
+    }
+  };
+
+  const copyInmail = () => {
+    const body = inmailText.includes("---") ? inmailText.split("---").slice(1).join("---").trim() : inmailText;
+    navigator.clipboard?.writeText(body);
+    setInmailCopied(true); setTimeout(() => setInmailCopied(false), 2000);
+  };
+
+  const toggleSector = (s) => setCriteria(p => ({ ...p, sectors: p.sectors.includes(s) ? p.sectors.filter(x => x !== s) : [...p.sectors, s] }));
+  const gc = (sc) => sc >= 75 ? "#22a55b" : sc >= 50 ? ACCENT : "#dc3545";
+  const gl = (sc) => sc >= 80 ? "Excellent" : sc >= 65 ? "Bon" : sc >= 45 ? "Moyen" : "Faible";
+  const stepLabels = ["Critères", "Recherche", "Profils", "Analyse IA", "Résultats"];
+  const cs = step <= 1 ? 0 : step <= 1.5 ? 1 : step === 2 ? 2 : step === 3 ? 3 : 4;
+  const inputStyle = { width: "100%", padding: "10px 14px", borderRadius: 8, border: "1.5px solid #e0e0e0", fontSize: 14, outline: "none", boxSizing: "border-box" };
+
+  return (
+    <div style={{ minHeight: "100vh", background: LIGHT_BG }}>
+      {/* Header */}
+      <div style={{ background: NABBOO_BLUE, padding: "14px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", boxShadow: "0 2px 12px rgba(0,0,0,0.15)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ width: 36, height: 36, borderRadius: 8, background: `linear-gradient(135deg, ${ACCENT}, #d4782e)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, fontWeight: 700, color: "#fff" }}>N</div>
+          <div>
+            <div style={{ color: "#fff", fontSize: 16, fontWeight: 700 }}>Nabboo Matcher</div>
+            <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 10 }}>Pipeline de sourcing complet</div>
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          {profiles.length > 0 && <div style={{ color: "rgba(255,255,255,0.6)", fontSize: 12 }}>{profiles.length} profils</div>}
+          <button onClick={() => setShowConfig(!showConfig)} style={{ background: showConfig ? ACCENT : "rgba(255,255,255,0.1)", border: "none", borderRadius: 8, padding: "8px 12px", color: "#fff", cursor: "pointer", fontSize: 14 }}>⚙️</button>
+        </div>
+      </div>
+
+      {/* Config */}
+      {showConfig && (
+        <div style={{ background: "#fff", borderBottom: "1px solid #eee", padding: "16px 24px", animation: "fadeIn 0.3s" }}>
+          <div style={{ maxWidth: 1000, margin: "0 auto", display: "flex", gap: 20, flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 200 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: NABBOO_BLUE, marginBottom: 8 }}>🧠 Claude AI</div>
+              <input type="password" value={claudeApiKey} onChange={e => updateConfig("claudeApiKey", e.target.value, setClaudeApiKey)} placeholder="Clé API Anthropic (sk-ant-...)" style={{ ...inputStyle, fontSize: 12, padding: "8px 12px" }} />
+              <div style={{ fontSize: 11, color: claudeApiKey ? "#22a55b" : "#dc3545", marginTop: 4, fontWeight: 600 }}>{claudeApiKey ? "✅ Connecté" : "⚠️ Requis"}</div>
+            </div>
+            <div style={{ flex: 1, minWidth: 200 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: NABBOO_BLUE, marginBottom: 8 }}>🔑 PhantomBuster</div>
+              <input type="password" value={pbApiKey} onChange={e => updateConfig("pbApiKey", e.target.value, setPbApiKey)} placeholder="Clé API PhantomBuster" style={{ ...inputStyle, fontSize: 12, padding: "8px 12px" }} />
+              <div style={{ fontSize: 11, color: pbApiKey ? "#22a55b" : MUTED, marginTop: 4, fontWeight: 600 }}>{pbApiKey ? "✅" : "Optionnel"}</div>
+            </div>
+            <div style={{ flex: 1, minWidth: 200 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: NABBOO_BLUE, marginBottom: 8 }}>📱 Kaspr</div>
+              <input type="password" value={kasprKey} onChange={e => updateConfig("kasprKey", e.target.value, setKasprKey)} placeholder="Clé API Kaspr" style={{ ...inputStyle, fontSize: 12, padding: "8px 12px" }} />
+              <div style={{ fontSize: 11, color: kasprKey ? "#22a55b" : MUTED, marginTop: 4, fontWeight: 600 }}>{kasprKey ? "✅" : "Optionnel"}</div>
+            </div>
+            <div style={{ flex: 1, minWidth: 200 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: NABBOO_BLUE, marginBottom: 8 }}>📊 Boond</div>
+              <input type="password" value={boondToken} onChange={e => updateConfig("boondToken", e.target.value, setBoondToken)} placeholder="Token (client:user)" style={{ ...inputStyle, fontSize: 12, padding: "8px 12px", marginBottom: 4 }} />
+              <input type="password" value={boondKey} onChange={e => updateConfig("boondKey", e.target.value, setBoondKey)} placeholder="Clé client" style={{ ...inputStyle, fontSize: 12, padding: "8px 12px", marginBottom: 4 }} />
+              <input type="text" value={claudeCarreId} onChange={e => updateConfig("claudeCarreId", e.target.value, setClaudeCarreId)} placeholder="ID Manager (8982)" style={{ ...inputStyle, fontSize: 12, padding: "8px 12px" }} />
+              <div style={{ fontSize: 11, color: boondToken && boondKey ? "#22a55b" : MUTED, marginTop: 4, fontWeight: 600 }}>{boondToken && boondKey ? "✅" : "Optionnel"}</div>
+            </div>
+            <div style={{ flex: 1, minWidth: 200 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: NABBOO_BLUE, marginBottom: 8 }}>✉️ Signature</div>
+              <input type="text" value={recruiterName} onChange={e => updateConfig("recruiterName", e.target.value, setRecruiterName)} placeholder="Votre nom" style={{ ...inputStyle, fontSize: 12, padding: "8px 12px", marginBottom: 4 }} />
+              <input type="text" value={recruiterTitle} onChange={e => updateConfig("recruiterTitle", e.target.value, setRecruiterTitle)} placeholder="Votre titre" style={{ ...inputStyle, fontSize: 12, padding: "8px 12px" }} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Steps */}
+      <div style={{ display: "flex", justifyContent: "center", gap: 0, padding: "20px 24px 8px" }}>
+        {stepLabels.map((label, i) => (
+          <div key={i} style={{ display: "flex", alignItems: "center" }}>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 5 }}>
+              <div style={{ width: 28, height: 28, borderRadius: "50%", background: cs >= i ? (cs === i ? ACCENT : NABBOO_BLUE) : "#ddd", color: cs >= i ? "#fff" : MUTED, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 600, transition: "all 0.3s" }}>{i + 1}</div>
+              <div style={{ fontSize: 10, color: cs >= i ? NABBOO_BLUE : MUTED, fontWeight: cs === i ? 600 : 400 }}>{label}</div>
+            </div>
+            {i < 4 && <div style={{ width: 40, height: 2, background: cs > i ? NABBOO_BLUE : "#ddd", margin: "0 6px", marginBottom: 18 }} />}
+          </div>
+        ))}
+      </div>
+
+      <div style={{ maxWidth: 900, margin: "0 auto", padding: "12px 24px 40px" }}>
+
+        {/* STEP 0-1: Criteria */}
+        {step <= 1 && (
+          <div style={{ animation: "fadeIn 0.4s ease" }}>
+            <div style={{ textAlign: "center", marginBottom: 20, fontFamily: "'Playfair Display', serif", fontSize: 24, fontWeight: 700, color: NABBOO_BLUE }}>Que recherchez-vous ?</div>
+            <div style={{ background: CARD_BG, borderRadius: 16, padding: 24, boxShadow: "0 1px 8px rgba(0,0,0,0.06)" }}>
+              <div style={{ marginBottom: 20 }}>
+                <label style={{ fontSize: 13, fontWeight: 600, color: NABBOO_BLUE, display: "block", marginBottom: 8 }}>Filiale ciblée</label>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {subsidiaries.map(sub => (<button key={sub.id} onClick={() => setCriteria(p => ({ ...p, subsidiary: p.subsidiary === sub.id ? "" : sub.id }))} style={{ padding: "8px 16px", borderRadius: 10, border: criteria.subsidiary === sub.id ? `2px solid ${ACCENT}` : "2px solid #e0e0e0", background: criteria.subsidiary === sub.id ? "rgba(232,150,62,0.08)" : "#fff", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2 }}><span style={{ fontSize: 13, fontWeight: 600, color: NABBOO_BLUE }}>{sub.emoji} {sub.name}</span><span style={{ fontSize: 10, color: MUTED }}>{sub.desc}</span></button>))}
+                </div>
+              </div>
+              <div style={{ marginBottom: 16 }}><label style={{ fontSize: 13, fontWeight: 600, color: NABBOO_BLUE, display: "block", marginBottom: 6 }}>Poste recherché *</label><input type="text" value={criteria.jobTitle} onChange={e => setCriteria(p => ({ ...p, jobTitle: e.target.value }))} placeholder="Ex: Concepteur mécanique, Ingénieur essais..." style={inputStyle} /></div>
+              <div style={{ marginBottom: 16 }}><label style={{ fontSize: 13, fontWeight: 600, color: NABBOO_BLUE, display: "block", marginBottom: 6 }}>Compétences clés</label><input type="text" value={criteria.skills} onChange={e => setCriteria(p => ({ ...p, skills: e.target.value }))} placeholder="Ex: CATIA V5, Solidworks, RCC-M..." style={inputStyle} /></div>
+              <div style={{ marginBottom: 16 }}><label style={{ fontSize: 13, fontWeight: 600, color: NABBOO_BLUE, display: "block", marginBottom: 6 }}>Localisation souhaitée</label><input type="text" value={criteria.location} onChange={e => setCriteria(p => ({ ...p, location: e.target.value }))} placeholder="Ex: Île-de-France, Lyon, Cherbourg..." style={inputStyle} /></div>
+              <div style={{ marginBottom: 16 }}><label style={{ fontSize: 13, fontWeight: 600, color: NABBOO_BLUE, display: "block", marginBottom: 8 }}>Secteurs d'intérêt</label><div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{sectors.map(s => (<button key={s} onClick={() => toggleSector(s)} style={{ padding: "6px 14px", borderRadius: 20, border: criteria.sectors.includes(s) ? `2px solid ${NABBOO_BLUE}` : "2px solid #e0e0e0", background: criteria.sectors.includes(s) ? NABBOO_BLUE : "#fff", color: criteria.sectors.includes(s) ? "#fff" : NABBOO_BLUE, fontSize: 12, fontWeight: 500, cursor: "pointer" }}>{s}</button>))}</div></div>
+              <div style={{ marginBottom: 16 }}><label style={{ fontSize: 13, fontWeight: 600, color: NABBOO_BLUE, display: "block", marginBottom: 8 }}>Niveau d'expérience</label><div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{[{ id: "any", label: "Tout niveau" }, { id: "junior", label: "Junior (0-3 ans)" }, { id: "mid", label: "Confirmé (3-7 ans)" }, { id: "senior", label: "Senior (7+ ans)" }].map(exp => (<button key={exp.id} onClick={() => setCriteria(p => ({ ...p, experience: exp.id }))} style={{ padding: "6px 14px", borderRadius: 20, border: criteria.experience === exp.id ? `2px solid ${ACCENT}` : "2px solid #e0e0e0", background: criteria.experience === exp.id ? "rgba(232,150,62,0.1)" : "#fff", color: criteria.experience === exp.id ? ACCENT : MUTED, fontSize: 12, fontWeight: 500, cursor: "pointer" }}>{exp.label}</button>))}</div></div>
+              {/* Habilitation */}
+              <div style={{ marginBottom: 16 }}><div onClick={() => setCriteria(p => ({ ...p, habilitable: !p.habilitable }))} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", borderRadius: 10, cursor: "pointer", border: criteria.habilitable ? "2px solid #c0392b" : "2px solid #e0e0e0", background: criteria.habilitable ? "rgba(192,57,43,0.05)" : "#fff" }}><div style={{ width: 42, height: 24, borderRadius: 12, position: "relative", background: criteria.habilitable ? "#c0392b" : "#ccc", flexShrink: 0 }}><div style={{ width: 20, height: 20, borderRadius: "50%", background: "#fff", position: "absolute", top: 2, left: criteria.habilitable ? 20 : 2, transition: "left 0.3s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)" }} /></div><div><div style={{ fontSize: 13, fontWeight: 600, color: criteria.habilitable ? "#c0392b" : NABBOO_BLUE }}>🔒 Habilitabilité requise</div><div style={{ fontSize: 11, color: MUTED }}>Nationalité française requise (défense/nucléaire)</div></div></div></div>
+              <div style={{ marginBottom: 20 }}><label style={{ fontSize: 13, fontWeight: 600, color: NABBOO_BLUE, display: "block", marginBottom: 6 }}>Description du besoin</label><textarea value={criteria.description} onChange={e => setCriteria(p => ({ ...p, description: e.target.value }))} placeholder="Ex: Mission longue durée chez Framatome, programme EPR2..." rows={2} style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit", fontSize: 13 }} /></div>
+              <div style={{ borderTop: "1px solid #eee", paddingTop: 20, display: "flex", flexDirection: "column", gap: 12 }}>
+                <button onClick={launchPhantomBuster} disabled={!criteria.jobTitle} style={{ padding: "14px 24px", borderRadius: 12, border: "none", background: criteria.jobTitle ? `linear-gradient(135deg, ${ACCENT}, #d4782e)` : "#ddd", fontSize: 15, fontWeight: 700, color: "#fff", cursor: criteria.jobTitle ? "pointer" : "not-allowed", boxShadow: criteria.jobTitle ? "0 4px 12px rgba(232,150,62,0.3)" : "none" }}>🚀 Lancer la recherche automatique</button>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}><div style={{ flex: 1, height: 1, background: "#e0e0e0" }} /><span style={{ fontSize: 12, color: MUTED }}>ou</span><div style={{ flex: 1, height: 1, background: "#e0e0e0" }} /></div>
+                <div onDragOver={e => { e.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)} onDrop={handleDrop} onClick={() => fileInputRef.current?.click()} style={{ border: `2px dashed ${dragOver ? ACCENT : "#d0d0d0"}`, borderRadius: 12, padding: 20, textAlign: "center", cursor: "pointer" }}><div style={{ fontSize: 13, fontWeight: 500, color: MUTED }}>📄 Importer un CSV manuellement</div><input ref={fileInputRef} type="file" accept=".csv" style={{ display: "none" }} onChange={e => handleFile(e.target.files[0])} /></div>
+              </div>
+            </div>
+            {criteria.jobTitle && <div style={{ marginTop: 16, background: CARD_BG, borderRadius: 12, padding: "14px 18px", boxShadow: "0 1px 6px rgba(0,0,0,0.04)" }}><div style={{ fontSize: 12, fontWeight: 600, color: NABBOO_BLUE, marginBottom: 6 }}>🔗 URL LinkedIn</div><div onClick={() => navigator.clipboard?.writeText(buildLinkedInSearchURL(criteria))} style={{ fontSize: 11, color: "#0077b5", wordBreak: "break-all", background: "#f5f5f5", padding: "8px 10px", borderRadius: 6, cursor: "pointer" }}>{buildLinkedInSearchURL(criteria)}</div></div>}
+            {error && <div style={{ marginTop: 16, padding: "12px 16px", background: "#fef2f2", borderRadius: 8, color: "#dc3545", fontSize: 13, lineHeight: 1.5 }}>{error}</div>}
+          </div>
+        )}
+
+        {/* STEP 1.5: PB running */}
+        {step === 1.5 && (<div style={{ animation: "fadeIn 0.4s", textAlign: "center", paddingTop: 50 }}><div style={{ fontFamily: "'Playfair Display', serif", fontSize: 24, fontWeight: 700, color: NABBOO_BLUE, marginBottom: 20 }}>Recherche LinkedIn</div><div style={{ width: 240, height: 8, borderRadius: 4, background: "#e0e0e0", margin: "0 auto 16px", overflow: "hidden" }}><div style={{ width: `${progress}%`, height: "100%", borderRadius: 4, background: `linear-gradient(90deg, ${ACCENT}, #d4782e)`, transition: "width 0.5s" }} /></div><div style={{ fontSize: 14, color: MUTED }}>{pbStatus}</div><div style={{ fontSize: 48, marginTop: 28, animation: "pulse 1.5s infinite" }}>🔍</div></div>)}
+
+        {/* STEP 2: Profiles */}
+        {step === 2 && (<div style={{ animation: "fadeIn 0.4s" }}><div style={{ textAlign: "center", marginBottom: 20, fontFamily: "'Playfair Display', serif", fontSize: 24, fontWeight: 700, color: NABBOO_BLUE }}>{profiles.length} profils chargés</div><div style={{ fontSize: 13, textAlign: "center", color: MUTED, marginBottom: 24 }}>{criteria.habilitable && <span style={{ color: "#c0392b", fontWeight: 600 }}>🔒 Filtre habilitabilité · </span>}Prêt pour l'analyse</div><div style={{ background: CARD_BG, borderRadius: 14, padding: 20, marginBottom: 20, boxShadow: "0 1px 6px rgba(0,0,0,0.06)", maxHeight: 300, overflow: "auto" }}>{profiles.slice(0, 5).map((p, i) => (<div key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: i < 4 ? "1px solid #f0f0f0" : "none" }}><div style={{ width: 36, height: 36, borderRadius: "50%", background: `linear-gradient(135deg, ${NABBOO_BLUE}, #34495e)`, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 14, fontWeight: 600, flexShrink: 0 }}>{(p.firstName || "?")[0]}</div><div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: 14, fontWeight: 600, color: NABBOO_BLUE }}>{p.fullName}</div><div style={{ fontSize: 12, color: MUTED, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.headline || p.jobTitle} · {p.company}</div></div></div>))}{profiles.length > 5 && <div style={{ fontSize: 12, color: MUTED, textAlign: "center", paddingTop: 8 }}>+ {profiles.length - 5} autres</div>}</div><div style={{ display: "flex", gap: 12, justifyContent: "space-between" }}><button onClick={() => { setStep(0); setProfiles([]); }} style={{ padding: "12px 20px", borderRadius: 10, border: "2px solid #e0e0e0", background: "#fff", fontSize: 13, color: MUTED, cursor: "pointer" }}>← Critères</button><button onClick={runAnalysis} style={{ padding: "12px 28px", borderRadius: 10, border: "none", background: `linear-gradient(135deg, ${ACCENT}, #d4782e)`, fontSize: 15, fontWeight: 700, color: "#fff", cursor: "pointer", boxShadow: "0 4px 12px rgba(232,150,62,0.3)" }}>🧠 Lancer l'analyse IA</button></div></div>)}
+
+        {/* STEP 3: Analyzing */}
+        {step === 3 && (<div style={{ animation: "fadeIn 0.4s", textAlign: "center", paddingTop: 50 }}><div style={{ fontFamily: "'Playfair Display', serif", fontSize: 24, fontWeight: 700, color: NABBOO_BLUE, marginBottom: 20 }}>Analyse en cours</div><div style={{ width: 240, height: 8, borderRadius: 4, background: "#e0e0e0", margin: "0 auto 16px", overflow: "hidden" }}><div style={{ width: `${progress}%`, height: "100%", borderRadius: 4, background: `linear-gradient(90deg, ${ACCENT}, #d4782e)`, transition: "width 0.5s" }} /></div><div style={{ fontSize: 14, color: MUTED }}>{progressMsg}</div><div style={{ fontSize: 48, marginTop: 28, animation: "pulse 1.5s infinite" }}>🧠</div></div>)}
+
+        {/* STEP 4: Results */}
+        {step === 4 && (<div style={{ animation: "fadeIn 0.4s" }}>
+          <div style={{ textAlign: "center", marginBottom: 8, fontFamily: "'Playfair Display', serif", fontSize: 24, fontWeight: 700, color: NABBOO_BLUE }}>Résultats</div>
+          <div style={{ fontSize: 13, textAlign: "center", color: MUTED, marginBottom: 24 }}>{results.length} profils classés{criteria.habilitable && <span style={{ color: "#c0392b" }}> · 🔒 Habilitabilité</span>}</div>
+          <div style={{ display: "flex", gap: 12, marginBottom: 24, flexWrap: "wrap", justifyContent: "center" }}>
+            {[{ l: "Excellents", c: results.filter(r => r.score >= 75).length, col: "#22a55b", e: "🟢" },{ l: "Bons", c: results.filter(r => r.score >= 50 && r.score < 75).length, col: ACCENT, e: "🟡" },{ l: "Faibles", c: results.filter(r => r.score < 50).length, col: "#dc3545", e: "🔴" }].map(cat => (
+              <div key={cat.l} style={{ background: CARD_BG, borderRadius: 12, padding: "14px 22px", boxShadow: "0 1px 6px rgba(0,0,0,0.06)", display: "flex", alignItems: "center", gap: 10, minWidth: 120 }}><span style={{ fontSize: 20 }}>{cat.e}</span><div><div style={{ fontSize: 20, fontWeight: 700, color: cat.col }}>{cat.c}</div><div style={{ fontSize: 11, color: MUTED }}>{cat.l}</div></div></div>
+            ))}
+          </div>
+          {results.map((r, i) => (
+            <div key={i} style={{ background: CARD_BG, borderRadius: 14, padding: "16px 20px", marginBottom: 10, boxShadow: "0 1px 6px rgba(0,0,0,0.06)", borderLeft: `4px solid ${gc(r.score)}` }}>
+              <div onClick={() => setExpandedId(expandedId === i ? null : i)} style={{ cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1, minWidth: 0 }}>
+                  <div style={{ width: 42, height: 42, borderRadius: "50%", background: `linear-gradient(135deg, ${NABBOO_BLUE}, #34495e)`, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 16, fontWeight: 700, flexShrink: 0 }}>{(r.firstName || "?")[0]}</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: NABBOO_BLUE, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                      {r.fullName}
+                      {r.habilitableStatus === "non-eligible" && <span style={{ fontSize: 10, color: "#c0392b", fontWeight: 600 }}>🔒 Non éligible</span>}
+                      {r._boondId && <span style={{ fontSize: 10, color: "#22a55b", fontWeight: 600 }}>✅ Boond</span>}
+                    </div>
+                    <div style={{ fontSize: 12, color: MUTED, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.headline || r.jobTitle}</div>
+                    <div style={{ fontSize: 11, color: MUTED }}>{r.company} {r.location ? `· ${r.location}` : ""} {(r.phoneNumber || r.phone || r.personalPhone) ? " · 📱" : ""}</div>
+                  </div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
+                  {r.suggestedSubsidiary && <div style={{ padding: "3px 8px", borderRadius: 6, fontSize: 10, fontWeight: 600, background: "rgba(26,39,68,0.08)", color: NABBOO_BLUE }}>{r.suggestedSubsidiary}</div>}
+                  {r.boondTitle && <div style={{ padding: "3px 8px", borderRadius: 6, fontSize: 10, fontWeight: 500, background: "rgba(142,68,173,0.08)", color: "#8e44ad", maxWidth: 120, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={r.boondTitle}>{r.boondTitle}</div>}
+                  <div style={{ textAlign: "center" }}><div style={{ fontSize: 20, fontWeight: 700, color: gc(r.score), lineHeight: 1 }}>{r.score}</div><div style={{ fontSize: 9, color: MUTED }}>{gl(r.score)}</div></div>
+                  <span style={{ fontSize: 14, color: MUTED, transition: "transform 0.2s", transform: expandedId === i ? "rotate(180deg)" : "" }}>▼</span>
+                </div>
+              </div>
+              {expandedId === i && (
+                <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid #eee", animation: "fadeIn 0.3s" }}>
+                  <div style={{ fontSize: 13, color: "#444", marginBottom: 10, lineHeight: 1.6 }}>{r.reasoning}</div>
+                  {(r.phoneNumber || r.phone || r.personalPhone) && (
+                    <div style={{ marginBottom: 8, padding: "6px 10px", background: "rgba(34,165,91,0.06)", borderRadius: 6, display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: "#22a55b" }}>📱 {r.phoneNumber || r.phone || r.personalPhone}</span>
+                      {r.kasprEmail && <span style={{ fontSize: 12, color: "#0077b5", marginLeft: 8 }}>📧 {r.kasprEmail}</span>}
+                      {r.kasprDirectEmail && <span style={{ fontSize: 12, color: "#8e44ad", marginLeft: 8 }}>📧 {r.kasprDirectEmail}</span>}
+                    </div>
+                  )}
+                  {r.keyStrengths?.length > 0 && <div style={{ marginBottom: 8 }}><span style={{ fontSize: 12, fontWeight: 600, color: "#22a55b" }}>✅ Forces : </span><span style={{ fontSize: 12, color: "#444" }}>{r.keyStrengths.join(" · ")}</span></div>}
+                  {r.concerns?.length > 0 && <div style={{ marginBottom: 10 }}><span style={{ fontSize: 12, fontWeight: 600, color: ACCENT }}>⚠️ Attention : </span><span style={{ fontSize: 12, color: "#444" }}>{r.concerns.join(" · ")}</span></div>}
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <a href={r.linkedinProfileUrl || r.profileUrl} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} style={{ padding: "6px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600, background: "#0077b5", color: "#fff", textDecoration: "none" }}>🔗 LinkedIn</a>
+                    {kasprKey && (
+                      <button onClick={e => { e.stopPropagation(); if (!r.phoneNumber && !r._phoneLoading) fetchPhone(r, i); }} disabled={!!r.phoneNumber || r._phoneLoading} style={{ padding: "6px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600, border: "none", background: r.phoneNumber ? (r.phoneNumber.startsWith("❌") || r.phoneNumber === "Non trouvé" ? "#f39c12" : "#27ae60") : r._phoneLoading ? "#ddd" : "#2ecc71", color: "#fff", cursor: (r.phoneNumber || r._phoneLoading) ? "default" : "pointer" }}>
+                        {r._phoneLoading ? "⏳ Recherche..." : r.phoneNumber ? (r.phoneNumber.startsWith("❌") || r.phoneNumber === "Non trouvé" ? "📱 Non trouvé" : `📱 ${r.phoneNumber}`) : "📱 Trouver le n°"}
+                      </button>
+                    )}
+                    <button onClick={e => { e.stopPropagation(); generateInmail(r); }} style={{ padding: "6px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600, border: "none", background: "#8e44ad", color: "#fff", cursor: "pointer" }}>✉️ InMail</button>
+                    <button onClick={e => { e.stopPropagation(); addToBoond(r); }} disabled={!!r._boondId} style={{ padding: "6px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600, border: `1.5px solid ${r._boondId ? "#22a55b" : NABBOO_BLUE}`, background: r._boondId ? "rgba(34,165,91,0.08)" : "#fff", color: r._boondId ? "#22a55b" : NABBOO_BLUE, cursor: r._boondId ? "default" : "pointer" }}>
+                      {r._boondId ? "✅ Dans Boond" : "➕ Ajouter à Boond"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+          <div style={{ display: "flex", gap: 12, justifyContent: "center", marginTop: 24 }}><button onClick={() => { setStep(0); setResults([]); setProfiles([]); setExpandedId(null); }} style={{ padding: "12px 24px", borderRadius: 10, border: "none", background: `linear-gradient(135deg, ${ACCENT}, #d4782e)`, fontSize: 14, fontWeight: 600, color: "#fff", cursor: "pointer" }}>🔄 Nouvelle recherche</button></div>
+        </div>)}
+      </div>
+
+      {/* InMail Modal */}
+      {inmailProfile && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 20 }} onClick={() => setInmailProfile(null)}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, padding: 28, maxWidth: 560, width: "100%", maxHeight: "80vh", overflow: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)", animation: "fadeIn 0.3s" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 20 }}><div><div style={{ fontSize: 18, fontWeight: 700, color: NABBOO_BLUE }}>✉️ InMail — {inmailProfile.firstName}</div><div style={{ fontSize: 12, color: MUTED }}>{inmailProfile.headline} · {inmailProfile.company}</div></div><button onClick={() => setInmailProfile(null)} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: MUTED }}>✕</button></div>
+            {inmailLoading ? (<div style={{ textAlign: "center", padding: "40px 0" }}><div style={{ fontSize: 36, animation: "pulse 1.5s infinite", marginBottom: 12 }}>✍️</div><div style={{ fontSize: 14, color: MUTED }}>Rédaction personnalisée...</div></div>
+            ) : inmailText ? (<div>
+              {inmailText.includes("OBJET:") && <div style={{ marginBottom: 12, padding: "8px 12px", background: "#f5f5f5", borderRadius: 8 }}><div style={{ fontSize: 11, color: MUTED, marginBottom: 2 }}>Objet</div><div style={{ fontSize: 14, fontWeight: 600, color: NABBOO_BLUE }}>{inmailText.split("---")[0].replace("OBJET:", "").trim()}</div></div>}
+              <div style={{ padding: 16, background: "#fafafa", borderRadius: 10, border: "1px solid #eee", fontSize: 14, lineHeight: 1.7, color: "#333", whiteSpace: "pre-wrap" }}>{inmailText.includes("---") ? inmailText.split("---").slice(1).join("---").trim() : inmailText}</div>
+              <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
+                <button onClick={copyInmail} style={{ padding: "10px 20px", borderRadius: 10, border: "none", background: inmailCopied ? "#22a55b" : "#8e44ad", fontSize: 14, fontWeight: 600, color: "#fff", cursor: "pointer", flex: 1 }}>{inmailCopied ? "✅ Copié !" : "📋 Copier le message"}</button>
+                <a href={inmailProfile.linkedinProfileUrl || inmailProfile.profileUrl} target="_blank" rel="noopener noreferrer" style={{ padding: "10px 20px", borderRadius: 10, background: "#0077b5", fontSize: 14, fontWeight: 600, color: "#fff", textDecoration: "none", textAlign: "center", flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>🔗 Ouvrir LinkedIn</a>
+              </div>
+              <button onClick={() => generateInmail(inmailProfile)} style={{ width: "100%", padding: 10, borderRadius: 10, border: "1.5px solid #e0e0e0", background: "#fff", fontSize: 13, color: MUTED, cursor: "pointer", marginTop: 8 }}>🔄 Régénérer</button>
+            </div>) : null}
+          </div>
+        </div>
+      )}
+
+      {/* Boond Modal */}
+      {boondModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 20 }} onClick={() => { setBoondModal(null); setBoondStatus(""); }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, padding: 28, maxWidth: 420, width: "100%", boxShadow: "0 20px 60px rgba(0,0,0,0.3)", animation: "fadeIn 0.3s", textAlign: "center" }}>
+            {boondStatus === "creating" && <><div style={{ fontSize: 36, animation: "pulse 1.5s infinite", marginBottom: 12 }}>📊</div><div style={{ fontSize: 16, fontWeight: 600, color: NABBOO_BLUE }}>Création dans Boond...</div><div style={{ fontSize: 13, color: MUTED, marginTop: 6 }}>{boondModal.fullName}</div></>}
+            {boondStatus === "success" && <><div style={{ fontSize: 48, marginBottom: 12 }}>✅</div><div style={{ fontSize: 16, fontWeight: 600, color: "#22a55b" }}>Candidat créé !</div><div style={{ fontSize: 13, color: MUTED, marginTop: 6 }}>{boondModal.fullName} ajouté à BoondManager</div>{boondModal._boondId && <div style={{ fontSize: 12, color: MUTED, marginTop: 4 }}>ID: {boondModal._boondId}</div>}<button onClick={() => { setBoondModal(null); setBoondStatus(""); }} style={{ marginTop: 16, padding: "10px 24px", borderRadius: 10, border: "none", background: NABBOO_BLUE, color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>OK</button></>}
+            {boondStatus === "cors" && <><div style={{ fontSize: 48, marginBottom: 12 }}>⚠️</div><div style={{ fontSize: 16, fontWeight: 600, color: ACCENT }}>Restriction navigateur</div><div style={{ fontSize: 13, color: MUTED, marginTop: 8, lineHeight: 1.6 }}>Vérifiez vos identifiants Boond ou rechargez la page.</div><button onClick={() => { setBoondModal(null); setBoondStatus(""); }} style={{ marginTop: 16, padding: "10px 24px", borderRadius: 10, border: "none", background: NABBOO_BLUE, color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>OK</button></>}
+            {boondStatus.startsWith("error:") && <><div style={{ fontSize: 48, marginBottom: 12 }}>❌</div><div style={{ fontSize: 16, fontWeight: 600, color: "#dc3545" }}>Erreur</div><div style={{ fontSize: 13, color: MUTED, marginTop: 8 }}>{boondStatus.replace("error:", "")}</div><button onClick={() => { setBoondModal(null); setBoondStatus(""); }} style={{ marginTop: 16, padding: "10px 24px", borderRadius: 10, border: "none", background: NABBOO_BLUE, color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>OK</button></>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<NabbooMatcher />);
+  </script>
+</body>
+</html>
