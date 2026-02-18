@@ -176,8 +176,9 @@ function NabbooMatcher() {
         const s = await fetch(`https://api.phantombuster.com/api/v2/agents/fetch?id=7681967140145623`, { headers: { "X-Phantombuster-Key": pbApiKey } });
         if (s.ok) {
           const d = await s.json();
-          if (d.lastEndMessage && d.lastEndMessage.includes("error")) throw new Error("PhantomBuster erreur: " + d.lastEndMessage);
-          if (d.agentStatus === "not running" || d.s3Status === "available" || d.lastEndMessage) done = true;
+          console.log("PB poll:", { agentStatus: d.agentStatus, s3Status: d.s3Status, lastEndMessage: d.lastEndMessage, exitCode: d.exitCode, containerStatus: d.containerStatus });
+          if (d.lastEndMessage && d.lastEndMessage.toLowerCase().includes("error")) throw new Error("PhantomBuster erreur: " + d.lastEndMessage);
+          if (d.agentStatus !== "running" || d.exitCode !== undefined || d.lastEndMessage) done = true;
         }
       }
       if (!done) throw new Error("PhantomBuster est encore en cours. Téléchargez le CSV depuis PhantomBuster et importez-le.");
