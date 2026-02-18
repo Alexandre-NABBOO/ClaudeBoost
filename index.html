@@ -169,35 +169,53 @@ function NabbooMatcher() {
       if (!r.ok) throw new Error(`PB ${r.status}: ${JSON.stringify(rBody)}`);
       const containerId = rBody.containerId;
       setPbStatus("Recherche LinkedIn..."); setProgress(25);
-      let att = 0, done = false;
+      let att = 0, done = false, started = false;
       while (att < 80 && !done) {
-        await new Promise(r => setTimeout(r, 15000)); att++;
-        setProgress(25 + Math.min(55, att * 2)); setPbStatus(`Extraction... (${att * 15}s)`);
+        await new Promise(r => setTimeout(r, 10000)); att++;
+        setProgress(25 + Math.min(55, att * 3)); setPbStatus(started ? `Extraction... (${att * 10}s)` : `Démarrage... (${att * 10}s)`);
         const s = await fetch(`https://api.phantombuster.com/api/v2/agents/fetch?id=7681967140145623`, { headers: { "X-Phantombuster-Key": pbApiKey } });
         if (s.ok) {
           const d = await s.json();
-          console.log("PB poll:", { agentStatus: d.agentStatus, s3Status: d.s3Status, lastEndMessage: d.lastEndMessage, exitCode: d.exitCode, containerStatus: d.containerStatus });
-          if (d.lastEndMessage && d.lastEndMessage.toLowerCase().includes("error")) throw new Error("PhantomBuster erreur: " + d.lastEndMessage);
-          if (d.agentStatus !== "running" || d.exitCode !== undefined || d.lastEndMessage) done = true;
+          console.log("PB poll:", { lastEndType: d.lastEndType, launchType: d.launchType, started });
+          if (!started) {
+            // Phase 1: wait for phantom to start (lastEndType becomes null/undefined or changes)
+            if (!d.lastEndType || d.lastEndType === "running" || d.launchType === "api") started = true;
+            // If still "finished" after 30s, it may have run instantly — check if results changed
+            if (att >= 3 && d.lastEndType === "finished") { started = true; done = true; }
+          } else {
+            // Phase 2: wait for phantom to finish
+            if (d.lastEndType === "error") throw new Error("PhantomBuster erreur");
+            if (d.lastEndType === "finished" || d.lastEndType === "success") done = true;
+          }
         }
       }
-      if (!done) throw new Error("PhantomBuster est encore en cours. Téléchargez le CSV depuis PhantomBuster et importez-le.");
+      if (!done) throw new Error("PhantomBuster timeout. Téléchargez le CSV depuis PhantomBuster.");
       setPbStatus("Récupération des résultats..."); setProgress(75);
       // Try fetch-output first
       const o = await fetch(`https://api.phantombuster.com/api/v2/agents/fetch-output?id=7681967140145623`, { headers: { "X-Phantombuster-Key": pbApiKey } });
+      console.log("fetch-output status:", o.status);
       if (o.ok) {
         const d = await o.json();
+        console.log("fetch-output keys:", Object.keys(d), "resultObject:", !!d.resultObject, "output:", d.output?.substring?.(0, 200));
         if (d.resultObject) {
-          try { const t = await (await fetch(d.resultObject)).text(); const p = parseCSVText(t); if (p.length > 0) { setProfiles(p); setProgress(100); setTimeout(() => setStep(2), 1000); return; } } catch {}
+          try { const t = await (await fetch(d.resultObject)).text(); const p = parseCSVText(t); if (p.length > 0) { setProfiles(p); setProgress(100); setTimeout(() => setStep(2), 1000); return; } } catch(e) { console.log("resultObject fetch error:", e); }
+        }
+        // Try parsing output directly as CSV URL
+        if (d.output) {
+          const urlMatch = d.output.match(/https:\/\/[^\s"]+\.csv[^\s"]*/);
+          if (urlMatch) { try { const t = await (await fetch(urlMatch[0])).text(); const p = parseCSVText(t); if (p.length > 0) { setProfiles(p); setProgress(100); setTimeout(() => setStep(2), 1000); return; } } catch {} }
         }
       }
       // Fallback: try containers endpoint
       if (containerId) {
+        console.log("Trying container:", containerId);
         const c = await fetch(`https://api.phantombuster.com/api/v2/containers/fetch-result-object?id=${containerId}`, { headers: { "X-Phantombuster-Key": pbApiKey } });
+        console.log("container status:", c.status);
         if (c.ok) {
           const cd = await c.json();
+          console.log("container keys:", Object.keys(cd), "resultObject:", !!cd.resultObject);
           if (cd.resultObject) {
-            try { const t = await (await fetch(cd.resultObject)).text(); const p = parseCSVText(t); if (p.length > 0) { setProfiles(p); setProgress(100); setTimeout(() => setStep(2), 1000); return; } } catch {}
+            try { const t = await (await fetch(cd.resultObject)).text(); const p = parseCSVText(t); if (p.length > 0) { setProfiles(p); setProgress(100); setTimeout(() => setStep(2), 1000); return; } } catch(e) { console.log("container resultObject error:", e); }
           }
         }
       }
