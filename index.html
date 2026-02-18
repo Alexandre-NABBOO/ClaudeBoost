@@ -20,7 +20,7 @@
 <body>
   <div id="root"></div>
   <script type="text/babel">
-const { useState, useCallback, useRef } = React;
+const { useState, useCallback, useRef, useEffect } = React;
 
 const NABBOO_BLUE = "#1a2744";
 const ACCENT = "#e8963e";
@@ -73,12 +73,20 @@ function saveConfigLS(cfg) {
   try { localStorage.setItem("nabboo-config", JSON.stringify(cfg)); } catch {}
 }
 
+function loadSession() {
+  try { return JSON.parse(sessionStorage.getItem("nabboo-session") || "{}"); } catch { return {}; }
+}
+function saveSession(data) {
+  try { sessionStorage.setItem("nabboo-session", JSON.stringify(data)); } catch {}
+}
+
 function NabbooMatcher() {
   const saved = loadConfig();
-  const [step, setStep] = useState(0);
-  const [profiles, setProfiles] = useState([]);
-  const [criteria, setCriteria] = useState(defaultCriteria);
-  const [results, setResults] = useState([]);
+  const session = loadSession();
+  const [step, setStep] = useState(session.step || 0);
+  const [profiles, setProfiles] = useState(session.profiles || []);
+  const [criteria, setCriteria] = useState(session.criteria || defaultCriteria);
+  const [results, setResults] = useState(session.results || []);
   const [progress, setProgress] = useState(0);
   const [progressMsg, setProgressMsg] = useState("");
   const [error, setError] = useState("");
@@ -102,6 +110,12 @@ function NabbooMatcher() {
   const [boondModal, setBoondModal] = useState(null);
   const [boondStatus, setBoondStatus] = useState("");
   const fileInputRef = useRef(null);
+
+  // Auto-save session state
+  useEffect(() => {
+    if (step === 0 || step === 1.5 || step === 3) return; // don't save transitional states
+    saveSession({ step, profiles: profiles.slice(0, 200), criteria, results: results.slice(0, 200) });
+  }, [step, profiles, criteria, results]);
 
   const boondTitles = [
     "Dessinateur / Projeteur", "Concepteur mécanique", "Ingénieur Electrique", "Concepteur Electronique",
@@ -424,7 +438,7 @@ INSTRUCTIONS:
           <div style={{ width: 36, height: 36, borderRadius: 8, background: `linear-gradient(135deg, ${ACCENT}, #d4782e)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, fontWeight: 700, color: "#fff" }}>N</div>
           <div>
             <div style={{ color: "#fff", fontSize: 16, fontWeight: 700 }}>ClaudeBoost</div>
-            <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 10 }}>Le NABBOOST ... de Claude — v7</div>
+            <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 10 }}>Le NABBOOST ... de Claude — v8</div>
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -504,17 +518,6 @@ INSTRUCTIONS:
               <div style={{ marginBottom: 20 }}><label style={{ fontSize: 13, fontWeight: 600, color: NABBOO_BLUE, display: "block", marginBottom: 6 }}>Description du besoin</label><textarea value={criteria.description} onChange={e => setCriteria(p => ({ ...p, description: e.target.value }))} placeholder="Ex: Mission longue durée chez Framatome, programme EPR2..." rows={2} style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit", fontSize: 13 }} /></div>
               <div style={{ borderTop: "1px solid #eee", paddingTop: 20, display: "flex", flexDirection: "column", gap: 12 }}>
                 <button onClick={launchPhantomBuster} disabled={!criteria.jobTitle} style={{ padding: "14px 24px", borderRadius: 12, border: "none", background: criteria.jobTitle ? `linear-gradient(135deg, ${ACCENT}, #d4782e)` : "#ddd", fontSize: 15, fontWeight: 700, color: "#fff", cursor: criteria.jobTitle ? "pointer" : "not-allowed", boxShadow: criteria.jobTitle ? "0 4px 12px rgba(232,150,62,0.3)" : "none" }}>🚀 Lancer la recherche automatique</button>
-                {pbApiKey && <button onClick={async () => {
-                  try {
-                    const res = await fetch("https://api.phantombuster.com/api/v2/agents/fetch?id=7681967140145623", { headers: { "X-Phantombuster-Key": pbApiKey } });
-                    const data = await res.json();
-                    const arg = typeof data.argument === "string" ? JSON.parse(data.argument) : data.argument;
-                    const keys = arg ? Object.keys(arg) : [];
-                    const hasCookie = arg && ("sessionCookie" in arg);
-                    const identity = data.identityId || data.linkedInIdentityId || "non trouvé";
-                    setError(`🔍 DEBUG — Champs argument: [${keys.join(", ")}] | sessionCookie dans arg: ${hasCookie ? "OUI" : "NON"} | identityId: ${identity} | agentStatus: ${data.agentStatus || "?"} | lastEndMessage: ${data.lastEndMessage || "?"} | Tout: ${JSON.stringify(data).substring(0, 500)}`);
-                  } catch (err) { setError("Debug erreur: " + err.message); }
-                }} style={{ padding: "8px 16px", borderRadius: 8, border: "1px solid #ddd", background: "#fff", fontSize: 11, color: MUTED, cursor: "pointer" }}>🔍 Debug PB</button>}
                 <div style={{ display: "flex", alignItems: "center", gap: 12 }}><div style={{ flex: 1, height: 1, background: "#e0e0e0" }} /><span style={{ fontSize: 12, color: MUTED }}>ou</span><div style={{ flex: 1, height: 1, background: "#e0e0e0" }} /></div>
                 <div onDragOver={e => { e.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)} onDrop={handleDrop} onClick={() => fileInputRef.current?.click()} style={{ border: `2px dashed ${dragOver ? ACCENT : "#d0d0d0"}`, borderRadius: 12, padding: 20, textAlign: "center", cursor: "pointer" }}><div style={{ fontSize: 13, fontWeight: 500, color: MUTED }}>📄 Importer un CSV manuellement</div><input ref={fileInputRef} type="file" accept=".csv" style={{ display: "none" }} onChange={e => handleFile(e.target.files[0])} /></div>
               </div>
@@ -592,7 +595,7 @@ INSTRUCTIONS:
               )}
             </div>
           ))}
-          <div style={{ display: "flex", gap: 12, justifyContent: "center", marginTop: 24 }}><button onClick={() => { setStep(0); setResults([]); setProfiles([]); setExpandedId(null); }} style={{ padding: "12px 24px", borderRadius: 10, border: "none", background: `linear-gradient(135deg, ${ACCENT}, #d4782e)`, fontSize: 14, fontWeight: 600, color: "#fff", cursor: "pointer" }}>🔄 Nouvelle recherche</button></div>
+          <div style={{ display: "flex", gap: 12, justifyContent: "center", marginTop: 24 }}><button onClick={() => { setStep(0); setResults([]); setProfiles([]); setExpandedId(null); saveSession({}); }} style={{ padding: "12px 24px", borderRadius: 10, border: "none", background: `linear-gradient(135deg, ${ACCENT}, #d4782e)`, fontSize: 14, fontWeight: 600, color: "#fff", cursor: "pointer" }}>🔄 Nouvelle recherche</button></div>
         </div>)}
       </div>
 
@@ -621,7 +624,8 @@ INSTRUCTIONS:
           <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, padding: 28, maxWidth: 420, width: "100%", boxShadow: "0 20px 60px rgba(0,0,0,0.3)", animation: "fadeIn 0.3s", textAlign: "center" }}>
             {boondStatus === "creating" && <><div style={{ fontSize: 36, animation: "pulse 1.5s infinite", marginBottom: 12 }}>📊</div><div style={{ fontSize: 16, fontWeight: 600, color: NABBOO_BLUE }}>Création dans Boond...</div><div style={{ fontSize: 13, color: MUTED, marginTop: 6 }}>{boondModal.fullName}</div></>}
             {boondStatus === "success" && <><div style={{ fontSize: 48, marginBottom: 12 }}>✅</div><div style={{ fontSize: 16, fontWeight: 600, color: "#22a55b" }}>Candidat créé !</div><div style={{ fontSize: 13, color: MUTED, marginTop: 6 }}>{boondModal.fullName} ajouté à BoondManager</div>{boondModal._boondId && <div style={{ fontSize: 12, color: MUTED, marginTop: 4 }}>ID: {boondModal._boondId}</div>}<button onClick={() => { setBoondModal(null); setBoondStatus(""); }} style={{ marginTop: 16, padding: "10px 24px", borderRadius: 10, border: "none", background: NABBOO_BLUE, color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>OK</button></>}
-            {boondStatus === "cors" && <><div style={{ fontSize: 48, marginBottom: 12 }}>⚠️</div><div style={{ fontSize: 16, fontWeight: 600, color: ACCENT }}>Restriction navigateur</div><div style={{ fontSize: 13, color: MUTED, marginTop: 8, lineHeight: 1.6 }}>Vérifiez vos identifiants Boond ou rechargez la page.</div><button onClick={() => { setBoondModal(null); setBoondStatus(""); }} style={{ marginTop: 16, padding: "10px 24px", borderRadius: 10, border: "none", background: NABBOO_BLUE, color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>OK</button></>}
+            {boondStatus === "cors" && <><div style={{ fontSize: 48, marginBottom: 12 }}>⚠️</div><div style={{ fontSize: 16, fontWeight: 600, color: ACCENT }}>Restriction navigateur (CORS)</div><div style={{ fontSize: 13, color: MUTED, marginTop: 8, lineHeight: 1.6 }}>L'API Boond bloque les appels depuis le navigateur. Vous pouvez copier les infos pour un import manuel.</div><button onClick={() => { const p = boondModal; const txt = `Nom: ${p.fullName}\nTitre: ${p.boondTitle || p.headline || ""}\nEntreprise: ${p.company || ""}\nLocalisation: ${p.location || ""}\nLinkedIn: ${p.linkedinProfileUrl || p.profileUrl || ""}\nTéléphone: ${p.phoneNumber || ""}\nEmail: ${p.kasprEmail || ""}\nScore: ${p.score || "N/A"}/100\nFiliale: ${p.suggestedSubsidiary || "N/A"}`; navigator.clipboard?.writeText(txt); setBoondStatus("copied"); }} style={{ marginTop: 12, padding: "10px 24px", borderRadius: 10, border: "none", background: ACCENT, color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>📋 Copier les infos</button><a href="https://my.boondmanager.com/candidates/new" target="_blank" rel="noopener noreferrer" style={{ display: "block", marginTop: 8, fontSize: 12, color: "#0077b5" }}>Ouvrir Boond → Nouveau candidat</a><button onClick={() => { setBoondModal(null); setBoondStatus(""); }} style={{ marginTop: 8, padding: "8px 20px", borderRadius: 10, border: "1px solid #ddd", background: "#fff", fontSize: 13, color: MUTED, cursor: "pointer" }}>Fermer</button></>}
+            {boondStatus === "copied" && <><div style={{ fontSize: 48, marginBottom: 12 }}>📋</div><div style={{ fontSize: 16, fontWeight: 600, color: "#22a55b" }}>Infos copiées !</div><div style={{ fontSize: 13, color: MUTED, marginTop: 6 }}>Collez-les dans Boond.</div><a href="https://my.boondmanager.com/candidates/new" target="_blank" rel="noopener noreferrer" style={{ display: "block", marginTop: 12, padding: "10px 24px", borderRadius: 10, background: NABBOO_BLUE, color: "#fff", fontSize: 14, fontWeight: 600, textDecoration: "none", textAlign: "center" }}>Ouvrir Boond</a><button onClick={() => { setBoondModal(null); setBoondStatus(""); }} style={{ marginTop: 8, padding: "8px 20px", borderRadius: 10, border: "1px solid #ddd", background: "#fff", fontSize: 13, color: MUTED, cursor: "pointer" }}>Fermer</button></>}
             {boondStatus.startsWith("error:") && <><div style={{ fontSize: 48, marginBottom: 12 }}>❌</div><div style={{ fontSize: 16, fontWeight: 600, color: "#dc3545" }}>Erreur</div><div style={{ fontSize: 13, color: MUTED, marginTop: 8 }}>{boondStatus.replace("error:", "")}</div><button onClick={() => { setBoondModal(null); setBoondStatus(""); }} style={{ marginTop: 16, padding: "10px 24px", borderRadius: 10, border: "none", background: NABBOO_BLUE, color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>OK</button></>}
           </div>
         </div>
