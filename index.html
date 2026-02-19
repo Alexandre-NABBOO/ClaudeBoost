@@ -421,7 +421,7 @@ INSTRUCTIONS:
       const boondBaseUrl = boondProxy ? boondProxy.replace(/\/$/, "") : "https://ui.boondmanager.com";
       const res = await fetch(boondBaseUrl + "/api/candidates", {
         method: "POST",
-        headers: { "Content-Type": "application/vnd.api+json", "Authorization": "Bearer " + jwt },
+        headers: { "Content-Type": "application/vnd.api+json", "X-Jwt-Client-Boondmanager": jwt },
         body: JSON.stringify(body),
       });
       if (!res.ok) { const errData = await res.json().catch(() => ({})); throw new Error(errData.errors?.[0]?.detail || errData.message || `Erreur ${res.status}`); }
@@ -458,7 +458,7 @@ INSTRUCTIONS:
           <div style={{ width: 36, height: 36, borderRadius: 8, background: `linear-gradient(135deg, ${ACCENT}, #d4782e)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, fontWeight: 700, color: "#fff" }}>N</div>
           <div>
             <div style={{ color: "#fff", fontSize: 16, fontWeight: 700 }}>ClaudeBoost</div>
-            <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 10 }}>Le NABBOOST ... de Claude — v12</div>
+            <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 10 }}>Le NABBOOST ... de Claude — v13</div>
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -499,7 +499,7 @@ INSTRUCTIONS:
                   console.log("JWT:", jwt);
                   console.log("Tokens:", { clientToken: boondClientToken.slice(0,4)+"...", clientKey: boondClientKey.slice(0,4)+"...", userToken: boondUserToken.slice(0,4)+"..." });
                   const base = boondProxy ? boondProxy.replace(/\/$/, "") : "https://ui.boondmanager.com";
-                  const r = await fetch(base + "/api/application/version", { headers: { "Authorization": "Bearer " + jwt } });
+                  const r = await fetch(base + "/api/application/version", { headers: { "X-Jwt-Client-Boondmanager": jwt } });
                   const d = await r.json().catch(() => r.text());
                   alert(r.ok ? "✅ Boond OK!\n" + JSON.stringify(d) : "❌ Erreur " + r.status + "\n" + JSON.stringify(d));
                 } catch(e) { alert("❌ " + e.message); }
