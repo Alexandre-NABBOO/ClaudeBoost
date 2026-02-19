@@ -256,11 +256,12 @@ function NabbooMatcher() {
       });
       if (!res.ok) { const err = await res.json().catch(() => ({})); console.log("Kaspr error:", res.status, err); throw new Error(err.message || `Erreur ${res.status}`); }
       const data = await res.json();
-      console.log("Kaspr response:", JSON.stringify(data).slice(0, 500));
-      const phones = data.phone || data.phones || [];
-      const phone = Array.isArray(phones) && phones.length > 0 ? (phones[0].phone || phones[0].number || phones[0]) : (data.phoneNumber || data.mobilePhone || "");
-      const email = data.email || data.workEmail || "";
-      const directEmail = data.directEmail || data.personalEmail || "";
+      console.log("Kaspr response:", JSON.stringify(data).slice(0, 1000));
+      const p = data.profile || data;
+      console.log("Kaspr phones:", p.phones, "emails:", p.emails, "directEmails:", p.directEmails, "workEmails:", p.workEmails);
+      const phone = Array.isArray(p.phones) && p.phones.length > 0 ? (p.phones[0].phone || p.phones[0].number || p.phones[0]) : "";
+      const email = Array.isArray(p.workEmails) && p.workEmails.length > 0 ? (p.workEmails[0].email || p.workEmails[0]) : (Array.isArray(p.emails) && p.emails.length > 0 ? (p.emails[0].email || p.emails[0]) : "");
+      const directEmail = Array.isArray(p.directEmails) && p.directEmails.length > 0 ? (p.directEmails[0].email || p.directEmails[0]) : "";
       setResults(prev => prev.map((r, i) => i === idx ? { ...r, phoneNumber: phone || "Aucun n°", kasprEmail: email || undefined, kasprDirectEmail: directEmail || undefined, _phoneLoading: false } : r));
     } catch (err) {
       const msg = (err.message.includes("fetch") || err.message.includes("CORS") || err.message.includes("NetworkError")) ? "CORS — rechargez la page ou vérifiez votre plan Kaspr" : err.message;
@@ -467,7 +468,7 @@ INSTRUCTIONS:
           <div style={{ width: 36, height: 36, borderRadius: 8, background: `linear-gradient(135deg, ${ACCENT}, #d4782e)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, fontWeight: 700, color: "#fff" }}>N</div>
           <div>
             <div style={{ color: "#fff", fontSize: 16, fontWeight: 700 }}>ClaudeBoost</div>
-            <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 10 }}>Le NABBOOST ... de Claude — v20</div>
+            <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 10 }}>Le NABBOOST ... de Claude — v22</div>
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
