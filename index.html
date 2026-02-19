@@ -420,8 +420,7 @@ INSTRUCTIONS:
           type: "candidate",
           attributes: {
             firstName, lastName, state: 1, typeOf: -1,
-            title: profile.boondTitle || "Concepteur mécanique",
-            sourceType: 1, source: "Sourcing LinkedIn",
+            title: profile.boondTitle || "Concepteur mécanique", sourceType: 1,
             phone1: phoneClean, email1: emailAddr, city: cityClean, town: cityClean,
             information: {
               comments: `Source: Sourcing LinkedIn\nProfil: ${profile.linkedinProfileUrl || profile.profileUrl || ""}\nTitre LinkedIn: ${profile.headline || profile.jobTitle || ""}\nEntreprise: ${profile.company || ""}\nLocalisation: ${profile.location || ""}\nFormation: ${profile.school || ""} - ${profile.schoolDegree || ""}\n${phoneClean ? "Téléphone: " + phoneClean + "\n" : ""}${emailAddr ? "Email: " + emailAddr + "\n" : ""}Score ClaudeBoost: ${profile.score || "N/A"}/100\nFiliale suggérée: ${profile.suggestedSubsidiary || "N/A"}\nDate import: ${new Date().toLocaleDateString("fr-FR")}`,
@@ -432,7 +431,8 @@ INSTRUCTIONS:
               mainManager: { data: { id: String(claudeCarreId), type: "resource" } },
               hrManager: { data: { id: String(claudeCarreId), type: "resource" } }
             } : {}),
-            agency: { data: { id: "5", type: "agency" } }
+            agency: { data: { id: "5", type: "agency" } },
+            origin: { data: { id: "1", type: "appSourcingOriginTypes" } }
           }
         }
       };
@@ -476,7 +476,7 @@ INSTRUCTIONS:
           <div style={{ width: 36, height: 36, borderRadius: 8, background: `linear-gradient(135deg, ${ACCENT}, #d4782e)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, fontWeight: 700, color: "#fff" }}>N</div>
           <div>
             <div style={{ color: "#fff", fontSize: 16, fontWeight: 700 }}>ClaudeBoost</div>
-            <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 10 }}>Le NABBOOST ... de Claude — v18</div>
+            <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 10 }}>Le NABBOOST ... de Claude — v19</div>
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -619,7 +619,7 @@ INSTRUCTIONS:
                   {r.keyStrengths?.length > 0 && <div style={{ marginBottom: 8 }}><span style={{ fontSize: 12, fontWeight: 600, color: "#22a55b" }}>✅ Forces : </span><span style={{ fontSize: 12, color: "#444" }}>{r.keyStrengths.join(" · ")}</span></div>}
                   {r.concerns?.length > 0 && <div style={{ marginBottom: 10 }}><span style={{ fontSize: 12, fontWeight: 600, color: ACCENT }}>⚠️ Attention : </span><span style={{ fontSize: 12, color: "#444" }}>{r.concerns.join(" · ")}</span></div>}
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    <a href={toRecruiterUrl(r.linkedinProfileUrl || r.profileUrl)} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} style={{ padding: "6px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600, background: "#0077b5", color: "#fff", textDecoration: "none" }}>🔗 LinkedIn</a>
+                    <a href={r.linkedinProfileUrl || r.profileUrl} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} style={{ padding: "6px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600, background: "#0077b5", color: "#fff", textDecoration: "none" }}>🔗 LinkedIn</a>
                     {kasprKey && (
                       <button onClick={e => { e.stopPropagation(); if (!r.phoneNumber && !r._phoneLoading) fetchPhone(r, i); }} disabled={!!r.phoneNumber || r._phoneLoading} style={{ padding: "6px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600, border: "none", background: r.phoneNumber ? (r.phoneNumber.startsWith("❌") || r.phoneNumber === "Non trouvé" ? "#f39c12" : "#27ae60") : r._phoneLoading ? "#ddd" : "#2ecc71", color: "#fff", cursor: (r.phoneNumber || r._phoneLoading) ? "default" : "pointer" }}>
                         {r._phoneLoading ? "⏳ Recherche..." : r.phoneNumber ? (r.phoneNumber.startsWith("❌") || r.phoneNumber === "Non trouvé" ? "📱 Non trouvé" : `📱 ${r.phoneNumber}`) : "📱 Trouver le n°"}
@@ -649,7 +649,7 @@ INSTRUCTIONS:
               <div style={{ padding: 16, background: "#fafafa", borderRadius: 10, border: "1px solid #eee", fontSize: 14, lineHeight: 1.7, color: "#333", whiteSpace: "pre-wrap" }}>{inmailText.includes("---") ? inmailText.split("---").slice(1).join("---").trim() : inmailText}</div>
               <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
                 <button onClick={copyInmail} style={{ padding: "10px 20px", borderRadius: 10, border: "none", background: inmailCopied ? "#22a55b" : "#8e44ad", fontSize: 14, fontWeight: 600, color: "#fff", cursor: "pointer", flex: 1 }}>{inmailCopied ? "✅ Copié !" : "📋 Copier le message"}</button>
-                <a href={toRecruiterUrl(inmailProfile.linkedinProfileUrl || inmailProfile.profileUrl)} target="_blank" rel="noopener noreferrer" style={{ padding: "10px 20px", borderRadius: 10, background: "#0077b5", fontSize: 14, fontWeight: 600, color: "#fff", textDecoration: "none", textAlign: "center", flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>🔗 Ouvrir LinkedIn</a>
+                <a href={inmailProfile.linkedinProfileUrl || inmailProfile.profileUrl} target="_blank" rel="noopener noreferrer" style={{ padding: "10px 20px", borderRadius: 10, background: "#0077b5", fontSize: 14, fontWeight: 600, color: "#fff", textDecoration: "none", textAlign: "center", flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>🔗 Ouvrir LinkedIn</a>
               </div>
               <button onClick={() => generateInmail(inmailProfile)} style={{ width: "100%", padding: 10, borderRadius: 10, border: "1.5px solid #e0e0e0", background: "#fff", fontSize: 13, color: MUTED, cursor: "pointer", marginTop: 8 }}>🔄 Régénérer</button>
             </div>) : null}
