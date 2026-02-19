@@ -50,9 +50,9 @@ function parseCSVText(text) {
 }
 
 const subsidiaries = [
-  { id: "vacoa", name: "Vacoa", desc: "Conception & études méca/élec", emoji: "🌱" },
-  { id: "navys", name: "Navys", desc: "Construction, essais & maintenance", emoji: "⚛️" },
-  { id: "ginko", name: "Ginko", desc: "Contrôle-commande", emoji: "🔧" },
+  { id: "vacoa", name: "VACOA", desc: "Conception & études méca/élec", emoji: "🌱" },
+  { id: "navys", name: "NAVYS", desc: "Construction, essais & maintenance", emoji: "⚛️" },
+  { id: "ginko", name: "GINKO", desc: "Automatisation & Contrôle-commande", emoji: "🔧" },
 ];
 const sectors = ["Nucléaire", "Défense", "Spatial", "Énergie", "Industrie", "Aéronautique"];
 const defaultCriteria = { subsidiary: "", jobTitle: "", skills: "", location: "", sectors: [], experience: "any", description: "", habilitable: false };
@@ -244,7 +244,7 @@ function NabbooMatcher() {
     try {
       const res = await fetch("https://api.developers.kaspr.io/profile/linkedin", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": kasprKey, "accept-version": "v2.0" },
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + kasprKey, "accept-version": "v2.0" },
         body: JSON.stringify({ name: profile.fullName || "", id: linkedinId }),
       });
       if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.message || `Erreur ${res.status}`); }
@@ -279,6 +279,7 @@ Réponds UNIQUEMENT JSON valide:
 
 IMPORTANT pour boondTitle: choisis le titre le PLUS PROCHE dans cette liste EXACTE (copie-le tel quel):
 ${boondTitles.join(", ")}
+Si AUCUN titre de la liste ne correspond au métier recherché, utilise le format: Spécifique "${criteria.jobTitle}"
 
 Score 0-100, exigeant. Trie meilleur→moins bon.`;
 
@@ -405,7 +406,7 @@ INSTRUCTIONS:
             firstName, lastName, state: 1, typeOf: -1,
             title: profile.boondTitle || "Concepteur mécanique",
             sourceType: 6, source: "Sourcing LinkedIn",
-            phone1: phoneNum, email1: emailAddr, city: profile.location || "",
+            phone1: phoneNum, email1: emailAddr, city: profile.location || "", town: profile.location || "",
             information: {
               comments: `Source: Sourcing LinkedIn\nProfil: ${profile.linkedinProfileUrl || profile.profileUrl || ""}\nTitre LinkedIn: ${profile.headline || profile.jobTitle || ""}\nEntreprise: ${profile.company || ""}\nLocalisation: ${profile.location || ""}\nFormation: ${profile.school || ""} - ${profile.schoolDegree || ""}\n${phoneNum ? "Téléphone: " + phoneNum + "\n" : ""}${emailAddr ? "Email: " + emailAddr + "\n" : ""}Score ClaudeBoost: ${profile.score || "N/A"}/100\nFiliale suggérée: ${profile.suggestedSubsidiary || "N/A"}\nDate import: ${new Date().toLocaleDateString("fr-FR")}`,
             }
@@ -418,7 +419,7 @@ INSTRUCTIONS:
           }
         }
       };
-      const boondBaseUrl = boondProxy ? boondProxy.replace(/\/$/, "") : "https://ui.boondmanager.com";
+      const boondBaseUrl = "https://ui.boondmanager.com";
       const res = await fetch(boondBaseUrl + "/api/candidates", {
         method: "POST",
         headers: { "Content-Type": "application/vnd.api+json", "X-Jwt-Client-Boondmanager": jwt },
@@ -458,7 +459,7 @@ INSTRUCTIONS:
           <div style={{ width: 36, height: 36, borderRadius: 8, background: `linear-gradient(135deg, ${ACCENT}, #d4782e)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, fontWeight: 700, color: "#fff" }}>N</div>
           <div>
             <div style={{ color: "#fff", fontSize: 16, fontWeight: 700 }}>ClaudeBoost</div>
-            <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 10 }}>Le NABBOOST ... de Claude — v13</div>
+            <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 10 }}>Le NABBOOST ... de Claude — v15</div>
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -492,19 +493,7 @@ INSTRUCTIONS:
               <input type="password" value={boondClientKey} onChange={e => updateConfig("boondClientKey", e.target.value, setBoondClientKey)} placeholder="Client Key" style={{ ...inputStyle, fontSize: 12, padding: "8px 12px", marginBottom: 4 }} />
               <input type="password" value={boondUserToken} onChange={e => updateConfig("boondUserToken", e.target.value, setBoondUserToken)} placeholder="User Token" style={{ ...inputStyle, fontSize: 12, padding: "8px 12px", marginBottom: 4 }} />
               <input type="text" value={claudeCarreId} onChange={e => updateConfig("claudeCarreId", e.target.value, setClaudeCarreId)} placeholder="ID Manager (8982)" style={{ ...inputStyle, fontSize: 12, padding: "8px 12px", marginBottom: 4 }} />
-              <input type="text" value={boondProxy} onChange={e => updateConfig("boondProxy", e.target.value, setBoondProxy)} placeholder="Proxy URL (ex: https://boond-proxy.xxx.workers.dev)" style={{ ...inputStyle, fontSize: 12, padding: "8px 12px" }} />
-              <button onClick={async () => {
-                try {
-                  const jwt = await buildBoondJWT(boondClientToken, boondClientKey, boondUserToken);
-                  console.log("JWT:", jwt);
-                  console.log("Tokens:", { clientToken: boondClientToken.slice(0,4)+"...", clientKey: boondClientKey.slice(0,4)+"...", userToken: boondUserToken.slice(0,4)+"..." });
-                  const base = boondProxy ? boondProxy.replace(/\/$/, "") : "https://ui.boondmanager.com";
-                  const r = await fetch(base + "/api/application/version", { headers: { "X-Jwt-Client-Boondmanager": jwt } });
-                  const d = await r.json().catch(() => r.text());
-                  alert(r.ok ? "✅ Boond OK!\n" + JSON.stringify(d) : "❌ Erreur " + r.status + "\n" + JSON.stringify(d));
-                } catch(e) { alert("❌ " + e.message); }
-              }} style={{ marginTop: 4, padding: "6px 12px", borderRadius: 8, border: "1px solid #ddd", background: "#f5f5f5", fontSize: 11, cursor: "pointer", width: "100%" }}>🧪 Tester la connexion Boond</button>
-              <div style={{ fontSize: 11, color: boondClientToken && boondClientKey && boondUserToken ? (boondProxy ? "#22a55b" : "#f39c12") : MUTED, marginTop: 4, fontWeight: 600 }}>{boondClientToken && boondClientKey && boondUserToken ? (boondProxy ? "✅ Proxy actif" : "⚠️ Proxy requis (CORS)") : "Optionnel"}</div>
+              <div style={{ fontSize: 11, color: boondClientToken && boondClientKey && boondUserToken ? "#22a55b" : MUTED, marginTop: 4, fontWeight: 600 }}>{boondClientToken && boondClientKey && boondUserToken ? "✅ Connexion directe" : "Optionnel"}</div>
             </div>
             <div style={{ flex: 1, minWidth: 200 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: NABBOO_BLUE, marginBottom: 8 }}>✉️ Signature</div>
