@@ -93,12 +93,6 @@ async function buildBoondJWT(clientToken, clientKey, userToken) {
   return data + "." + sigB64;
 }
 
-function toRecruiterUrl(url) {
-  if (!url) return "";
-  const id = url.replace(/\/$/, "").split("/").pop();
-  return "https://www.linkedin.com/talent/profile/" + id;
-}
-
 function NabbooMatcher() {
   const saved = loadConfig();
   const session = loadSession();
@@ -119,7 +113,6 @@ function NabbooMatcher() {
   const [boondClientToken, setBoondClientToken] = useState(saved.boondClientToken || "");
   const [boondClientKey, setBoondClientKey] = useState(saved.boondClientKey || "");
   const [boondUserToken, setBoondUserToken] = useState(saved.boondUserToken || "");
-  const [boondProxy, setBoondProxy] = useState(saved.boondProxy || "");
   const [recruiterName, setRecruiterName] = useState(saved.recruiterName || "");
   const [recruiterTitle, setRecruiterTitle] = useState(saved.recruiterTitle || "");
   const [claudeCarreId, setClaudeCarreId] = useState(saved.claudeCarreId || "8982");
@@ -253,6 +246,7 @@ function NabbooMatcher() {
     if (!linkedinUrl) return;
     const linkedinId = linkedinUrl.replace(/\/$/, "").split("/").pop();
     if (!linkedinId) return;
+    console.log("Kaspr request:", { name: profile.fullName, id: linkedinId, url: linkedinUrl });
     setResults(prev => prev.map((r, i) => i === idx ? { ...r, _phoneLoading: true } : r));
     try {
       const res = await fetch("https://api.developers.kaspr.io/profile/linkedin", {
@@ -260,8 +254,9 @@ function NabbooMatcher() {
         headers: { "Content-Type": "application/json", "Authorization": "Bearer " + kasprKey, "accept-version": "v2.0" },
         body: JSON.stringify({ name: profile.fullName || "", id: linkedinId }),
       });
-      if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.message || `Erreur ${res.status}`); }
+      if (!res.ok) { const err = await res.json().catch(() => ({})); console.log("Kaspr error:", res.status, err); throw new Error(err.message || `Erreur ${res.status}`); }
       const data = await res.json();
+      console.log("Kaspr response:", JSON.stringify(data).slice(0, 500));
       const phones = data.phone || data.phones || [];
       const phone = Array.isArray(phones) && phones.length > 0 ? (phones[0].phone || phones[0].number || phones[0]) : (data.phoneNumber || data.mobilePhone || "");
       const email = data.email || data.workEmail || "";
@@ -420,9 +415,10 @@ INSTRUCTIONS:
           type: "candidate",
           attributes: {
             firstName, lastName, state: 1, typeOf: -1,
-            title: profile.boondTitle || "Concepteur mécanique", sourceType: 1,
+            title: profile.boondTitle || "Concepteur mécanique",
             phone1: phoneClean, email1: emailAddr, city: cityClean, town: cityClean,
             information: {
+              sourceType: 1, source: "Sourcing LinkedIn",
               comments: `Source: Sourcing LinkedIn\nProfil: ${profile.linkedinProfileUrl || profile.profileUrl || ""}\nTitre LinkedIn: ${profile.headline || profile.jobTitle || ""}\nEntreprise: ${profile.company || ""}\nLocalisation: ${profile.location || ""}\nFormation: ${profile.school || ""} - ${profile.schoolDegree || ""}\n${phoneClean ? "Téléphone: " + phoneClean + "\n" : ""}${emailAddr ? "Email: " + emailAddr + "\n" : ""}Score ClaudeBoost: ${profile.score || "N/A"}/100\nFiliale suggérée: ${profile.suggestedSubsidiary || "N/A"}\nDate import: ${new Date().toLocaleDateString("fr-FR")}`,
             }
           },
@@ -431,8 +427,7 @@ INSTRUCTIONS:
               mainManager: { data: { id: String(claudeCarreId), type: "resource" } },
               hrManager: { data: { id: String(claudeCarreId), type: "resource" } }
             } : {}),
-            agency: { data: { id: "5", type: "agency" } },
-            origin: { data: { id: "1", type: "appSourcingOriginTypes" } }
+            agency: { data: { id: "5", type: "agency" } }
           }
         }
       };
@@ -447,11 +442,7 @@ INSTRUCTIONS:
       setBoondStatus("success");
       profile._boondId = data.data?.id;
     } catch (err) {
-      if (err.message.includes("fetch") || err.message.includes("CORS")) {
-        if (!boondProxy) setBoondStatus("cors");
-        else setBoondStatus("error:Proxy inaccessible — vérifiez l'URL du Worker Cloudflare");
-      }
-      else setBoondStatus("error:" + err.message);
+      setBoondStatus("error:" + err.message);
     }
   };
 
@@ -476,7 +467,7 @@ INSTRUCTIONS:
           <div style={{ width: 36, height: 36, borderRadius: 8, background: `linear-gradient(135deg, ${ACCENT}, #d4782e)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, fontWeight: 700, color: "#fff" }}>N</div>
           <div>
             <div style={{ color: "#fff", fontSize: 16, fontWeight: 700 }}>ClaudeBoost</div>
-            <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 10 }}>Le NABBOOST ... de Claude — v19</div>
+            <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 10 }}>Le NABBOOST ... de Claude — v20</div>
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
