@@ -93,6 +93,26 @@ async function buildBoondJWT(clientToken, clientKey, userToken) {
   return data + "." + sigB64;
 }
 
+// --- Claude API with auto-retry on rate limit ---
+async function callClaude(apiKey, model, maxTokens, prompt, maxRetries = 3, onRetry = null) {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+      body: JSON.stringify({ model, max_tokens: maxTokens, messages: [{ role: "user", content: prompt }] }),
+    });
+    const data = await res.json();
+    if (data.error && data.error.message && data.error.message.includes("rate limit") && attempt < maxRetries - 1) {
+      console.log(`Rate limit hit, retry ${attempt + 1}/${maxRetries} in 30s...`);
+      if (onRetry) onRetry(attempt + 1, maxRetries);
+      await new Promise(r => setTimeout(r, 30000));
+      continue;
+    }
+    if (data.error) throw new Error(data.error.message);
+    return data;
+  }
+}
+
 function NabbooMatcher() {
   const saved = loadConfig();
   const session = loadSession();
@@ -294,14 +314,8 @@ Score 0-100, exigeant. Trie meilleur→moins bon.`;
 
     try {
       setProgress(30); setProgressMsg("Claude analyse...");
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": claudeApiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
-        body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 4000, messages: [{ role: "user", content: prompt }] }),
-      });
+      const data = await callClaude(claudeApiKey, "claude-sonnet-4-20250514", 4000, prompt, 3, (att, max) => setProgressMsg(`⏳ Limite API atteinte, nouvelle tentative ${att}/${max} dans 30s...`));
       setProgress(70); setProgressMsg("Finalisation...");
-      const data = await res.json();
-      if (data.error) throw new Error(data.error.message);
       const text = data.content.map(c => c.text || "").join("");
       const m = text.match(/\[[\s\S]*\]/);
       if (!m) throw new Error("Format inattendu");
@@ -386,13 +400,7 @@ INSTRUCTIONS:
 - Ne mets PAS de guillemets autour du résultat`;
 
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": claudeApiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
-        body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, messages: [{ role: "user", content: prompt }] }),
-      });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error.message);
+      const data = await callClaude(claudeApiKey, "claude-haiku-4-5-20251001", 1000, prompt, 3, (att, max) => setInmailText(`⏳ Limite API, tentative ${att}/${max} dans 30s...`));
       setInmailText(data.content.map(c => c.text || "").join(""));
     } catch (err) { setInmailText("Erreur: " + err.message); }
     setInmailLoading(false);
@@ -468,7 +476,7 @@ INSTRUCTIONS:
           <div style={{ width: 36, height: 36, borderRadius: 8, background: `linear-gradient(135deg, ${ACCENT}, #d4782e)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, fontWeight: 700, color: "#fff" }}>N</div>
           <div>
             <div style={{ color: "#fff", fontSize: 16, fontWeight: 700 }}>ClaudeBoost</div>
-            <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 10 }}>Le NABBOOST ... de Claude — v22</div>
+            <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 10 }}>Le NABBOOST ... de Claude — v23</div>
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -642,6 +650,7 @@ INSTRUCTIONS:
               <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
                 <button onClick={copyInmail} style={{ padding: "10px 20px", borderRadius: 10, border: "none", background: inmailCopied ? "#22a55b" : "#8e44ad", fontSize: 14, fontWeight: 600, color: "#fff", cursor: "pointer", flex: 1 }}>{inmailCopied ? "✅ Copié !" : "📋 Copier le message"}</button>
                 <a href={inmailProfile.linkedinProfileUrl || inmailProfile.profileUrl} target="_blank" rel="noopener noreferrer" style={{ padding: "10px 20px", borderRadius: 10, background: "#0077b5", fontSize: 14, fontWeight: 600, color: "#fff", textDecoration: "none", textAlign: "center", flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>🔗 Ouvrir LinkedIn</a>
+                {inmailProfile.phoneNumber && inmailProfile.phoneNumber !== "Non trouvé" && !inmailProfile.phoneNumber.startsWith("❌") && <a href={"https://wa.me/" + inmailProfile.phoneNumber.replace(/[^0-9+]/g, "").replace(/^\+/, "") + "?text=" + encodeURIComponent(inmailText.includes("---") ? inmailText.split("---").slice(1).join("---").trim() : inmailText)} target="_blank" rel="noopener noreferrer" style={{ padding: "10px 20px", borderRadius: 10, background: "#25D366", fontSize: 14, fontWeight: 600, color: "#fff", textDecoration: "none", textAlign: "center", flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>💬 WhatsApp</a>}
               </div>
               <button onClick={() => generateInmail(inmailProfile)} style={{ width: "100%", padding: 10, borderRadius: 10, border: "1.5px solid #e0e0e0", background: "#fff", fontSize: 13, color: MUTED, cursor: "pointer", marginTop: 8 }}>🔄 Régénérer</button>
             </div>) : null}
