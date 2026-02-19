@@ -102,7 +102,7 @@ async function callClaude(apiKey, model, maxTokens, prompt, maxRetries = 3, onRe
       body: JSON.stringify({ model, max_tokens: maxTokens, messages: [{ role: "user", content: prompt }] }),
     });
     const data = await res.json();
-    if (data.error && data.error.message && data.error.message.includes("rate limit") && attempt < maxRetries - 1) {
+    if (data.error && data.error.message && (data.error.message.includes("rate limit") || data.error.message.toLowerCase().includes("overloaded")) && attempt < maxRetries - 1) {
       console.log(`Rate limit hit, retry ${attempt + 1}/${maxRetries} in 30s...`);
       if (onRetry) onRetry(attempt + 1, maxRetries);
       await new Promise(r => setTimeout(r, 30000));
@@ -356,7 +356,7 @@ STYLE OBLIGATOIRE (respecte exactement ce ton):
 - Mentionner le secteur et la localisation de la mission
 - Terminer par proposition d'échange téléphonique de 10-15 minutes
 - PAS de phrases corporate creuses type "j'ai remarqué votre profil avec intérêt"
-- N'utilise PAS d'emojis ni de caractères spéciaux
+- Peut utiliser quelques emojis sobres (🛡️ 📍 🤝 🚀 ⚛️)
 
 VOICI DES EXEMPLES DU STYLE ATTENDU:
 
@@ -365,11 +365,11 @@ OBJET: Opportunité en mécanique – Secteur défense
 ---
 Bonjour [Prénom],
 
-Je me permets de vous contacter car je recrute actuellement pour un poste en mécanique, à pourvoir dans le secteur de la défense, en Île-de-France.
+Je me permets de vous contacter car je recrute actuellement pour un poste en mécanique, à pourvoir dans le secteur de la défense 🛡️, en Île-de-France 📍.
 
 Il s'agit d'un projet à fort enjeu technologique, dans un environnement stimulant et exigeant.
 
-Si vous êtes en veille ou curieux(se) d'en savoir plus, je serais ravie d'échanger avec vous !
+Si vous êtes en veille ou curieux(se) d'en savoir plus, je serais ravie d'échanger avec vous ! 🤝
 
 Très belle journée à vous,
 
@@ -400,7 +400,14 @@ INSTRUCTIONS:
 - Ne mets PAS de guillemets autour du résultat`;
 
     try {
-      const data = await callClaude(claudeApiKey, "claude-haiku-4-5-20251001", 1000, prompt, 3, (att, max) => setInmailText(`⏳ Limite API, tentative ${att}/${max} dans 30s...`));
+      let data;
+      try {
+        data = await callClaude(claudeApiKey, "claude-haiku-4-5-20251001", 1000, prompt, 3, (att, max) => setInmailText(`⏳ Limite API, tentative ${att}/${max} dans 30s...`));
+      } catch (haikuErr) {
+        console.log("Haiku failed, falling back to Sonnet:", haikuErr.message);
+        setInmailText("⏳ Haiku indisponible, bascule sur Sonnet...");
+        data = await callClaude(claudeApiKey, "claude-sonnet-4-20250514", 1000, prompt, 3, (att, max) => setInmailText(`⏳ Limite API, tentative ${att}/${max} dans 30s...`));
+      }
       setInmailText(data.content.map(c => c.text || "").join(""));
     } catch (err) { setInmailText("Erreur: " + err.message); }
     setInmailLoading(false);
@@ -476,7 +483,7 @@ INSTRUCTIONS:
           <div style={{ width: 36, height: 36, borderRadius: 8, background: `linear-gradient(135deg, ${ACCENT}, #d4782e)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, fontWeight: 700, color: "#fff" }}>N</div>
           <div>
             <div style={{ color: "#fff", fontSize: 16, fontWeight: 700 }}>ClaudeBoost</div>
-            <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 10 }}>Le NABBOOST ... de Claude — v24</div>
+            <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 10 }}>Le NABBOOST ... de Claude — v25</div>
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
