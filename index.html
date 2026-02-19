@@ -356,7 +356,7 @@ STYLE OBLIGATOIRE (respecte exactement ce ton):
 - Mentionner le secteur et la localisation de la mission
 - Terminer par proposition d'échange téléphonique de 10-15 minutes
 - PAS de phrases corporate creuses type "j'ai remarqué votre profil avec intérêt"
-- Peut utiliser quelques emojis sobres (🛡️ 📍 🤝 🚀 ⚛️)
+- N'utilise PAS d'emojis ni de caractères spéciaux
 
 VOICI DES EXEMPLES DU STYLE ATTENDU:
 
@@ -365,11 +365,11 @@ OBJET: Opportunité en mécanique – Secteur défense
 ---
 Bonjour [Prénom],
 
-Je me permets de vous contacter car je recrute actuellement pour un poste en mécanique, à pourvoir dans le secteur de la défense 🛡️, en Île-de-France 📍.
+Je me permets de vous contacter car je recrute actuellement pour un poste en mécanique, à pourvoir dans le secteur de la défense, en Île-de-France.
 
 Il s'agit d'un projet à fort enjeu technologique, dans un environnement stimulant et exigeant.
 
-Si vous êtes en veille ou curieux(se) d'en savoir plus, je serais ravie d'échanger avec vous ! 🤝
+Si vous êtes en veille ou curieux(se) d'en savoir plus, je serais ravie d'échanger avec vous !
 
 Très belle journée à vous,
 
@@ -476,7 +476,7 @@ INSTRUCTIONS:
           <div style={{ width: 36, height: 36, borderRadius: 8, background: `linear-gradient(135deg, ${ACCENT}, #d4782e)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, fontWeight: 700, color: "#fff" }}>N</div>
           <div>
             <div style={{ color: "#fff", fontSize: 16, fontWeight: 700 }}>ClaudeBoost</div>
-            <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 10 }}>Le NABBOOST ... de Claude — v23</div>
+            <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 10 }}>Le NABBOOST ... de Claude — v24</div>
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -650,7 +650,7 @@ INSTRUCTIONS:
               <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
                 <button onClick={copyInmail} style={{ padding: "10px 20px", borderRadius: 10, border: "none", background: inmailCopied ? "#22a55b" : "#8e44ad", fontSize: 14, fontWeight: 600, color: "#fff", cursor: "pointer", flex: 1 }}>{inmailCopied ? "✅ Copié !" : "📋 Copier le message"}</button>
                 <a href={inmailProfile.linkedinProfileUrl || inmailProfile.profileUrl} target="_blank" rel="noopener noreferrer" style={{ padding: "10px 20px", borderRadius: 10, background: "#0077b5", fontSize: 14, fontWeight: 600, color: "#fff", textDecoration: "none", textAlign: "center", flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>🔗 Ouvrir LinkedIn</a>
-                {inmailProfile.phoneNumber && inmailProfile.phoneNumber !== "Non trouvé" && !inmailProfile.phoneNumber.startsWith("❌") && <a href={"https://wa.me/" + inmailProfile.phoneNumber.replace(/[^0-9+]/g, "").replace(/^\+/, "") + "?text=" + encodeURIComponent(inmailText.includes("---") ? inmailText.split("---").slice(1).join("---").trim() : inmailText)} target="_blank" rel="noopener noreferrer" style={{ padding: "10px 20px", borderRadius: 10, background: "#25D366", fontSize: 14, fontWeight: 600, color: "#fff", textDecoration: "none", textAlign: "center", flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>💬 WhatsApp</a>}
+                {inmailProfile.phoneNumber && inmailProfile.phoneNumber !== "Non trouvé" && !inmailProfile.phoneNumber.startsWith("❌") && <a href={(() => { const body = inmailText.includes("---") ? inmailText.split("---").slice(1).join("---").trim() : inmailText; const clean = body.replace(/[\u{1F600}-\u{1F6FF}\u{1F900}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1FA00}-\u{1FAFF}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{FE00}-\u{FE0F}\u{200D}\u{20E3}\u{E0020}-\u{E007F}]/gu, "").replace(/ {2,}/g, " ").trim(); const phone = inmailProfile.phoneNumber.replace(/[^0-9+]/g, "").replace(/^\+/, ""); return "https://web.whatsapp.com/send?phone=" + phone + "&text=" + encodeURIComponent(clean); })()} target="_blank" rel="noopener noreferrer" style={{ padding: "10px 20px", borderRadius: 10, background: "#25D366", fontSize: 14, fontWeight: 600, color: "#fff", textDecoration: "none", textAlign: "center", flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>💬 WhatsApp</a>}
               </div>
               <button onClick={() => generateInmail(inmailProfile)} style={{ width: "100%", padding: 10, borderRadius: 10, border: "1.5px solid #e0e0e0", background: "#fff", fontSize: 13, color: MUTED, cursor: "pointer", marginTop: 8 }}>🔄 Régénérer</button>
             </div>) : null}
