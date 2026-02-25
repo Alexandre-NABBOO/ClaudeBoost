@@ -315,36 +315,48 @@ function NabbooMatcher() {
 
   const runAnalysis = async () => {
     if (!claudeApiKey) { setError("Configurez votre clé API Claude (⚙️)"); setShowConfig(true); return; }
-    setStep(3); setProgress(0); setProgressMsg("Préparation...");
-    const summaries = profiles.map((p, i) =>
-      `Profil ${i+1}: ${p.fullName}\nTitre: ${p.headline || p.jobTitle || "N/A"}\nEntreprise: ${p.company || "N/A"} (${p.industry || "N/A"})\nPoste: ${p.jobTitle || "N/A"} (${p.jobDateRange || ""})\nPrécédent: ${p.jobTitle2 || "N/A"} chez ${p.company2 || "N/A"} (${p.jobDateRange2 || ""})\nLocalisation: ${p.location || "N/A"}\nFormation: ${p.school || "N/A"} - ${p.schoolDegree || "N/A"} (${p.schoolDateRange || ""})\nFormation2: ${p.school2 || "N/A"} - ${p.schoolDegree2 || "N/A"} (${p.schoolDateRange2 || ""})\nInfo: ${p.additionalInfo || "Aucune"}`
-    ).join("\n---\n");
+    setStep(3); setProgress(2); setProgressMsg(`Préparation de ${profiles.length} profils en ${Math.ceil(profiles.length / 25)} lots...`);
     const hab = criteria.habilitable ? `\n\nCRITÈRE HABILITABILITÉ ACTIVÉ: Poste nécessitant habilitation défense/nucléaire française. Seuls les profils avec un parcours suggérant fortement la nationalité française sont éligibles (études en France, entreprises françaises). Un nom d'origine étrangère avec parcours 100% français = éligible. Parcours principalement à l'étranger = non éligible (score 0, mention "Non éligible - habilitation"). C'est ÉLIMINATOIRE.` : "";
     const sub = criteria.subsidiary ? subsidiaries.find(s => s.id === criteria.subsidiary)?.name || "Toutes" : "Toutes";
-    const prompt = `Expert recrutement groupe Nabboo, conseil ingénierie nucléaire/défense/spatial. 3 filiales: Vacoa (conception/études méca/élec), Navys (construction/essais/maintenance nucléaire), Ginko (contrôle-commande).
+    const BATCH_SIZE = 25;
+    const batches = [];
+    for (let i = 0; i < profiles.length; i += BATCH_SIZE) batches.push(profiles.slice(i, i + BATCH_SIZE));
+    let allResults = [];
+    try {
+      for (let b = 0; b < batches.length; b++) {
+        const batch = batches[b];
+        const startIdx = b * BATCH_SIZE;
+        setProgress(Math.round(((b) / batches.length) * 90 + 5)); setProgressMsg(`Lot ${b + 1}/${batches.length} — ${Math.min((b + 1) * BATCH_SIZE, profiles.length)}/${profiles.length} profils`);
+        const summaries = batch.map((p, i) =>
+          `Profil ${startIdx + i + 1}: ${p.fullName}\nTitre: ${p.headline || p.jobTitle || "N/A"}\nEntreprise: ${p.company || "N/A"} (${p.industry || "N/A"})\nPoste: ${p.jobTitle || "N/A"} (${p.jobDateRange || ""})\nPrécédent: ${p.jobTitle2 || "N/A"} chez ${p.company2 || "N/A"} (${p.jobDateRange2 || ""})\nLocalisation: ${p.location || "N/A"}\nFormation: ${p.school || "N/A"} - ${p.schoolDegree || "N/A"} (${p.schoolDateRange || ""})\nFormation2: ${p.school2 || "N/A"} - ${p.schoolDegree2 || "N/A"} (${p.schoolDateRange2 || ""})\nInfo: ${p.additionalInfo || "Aucune"}`
+        ).join("\n---\n");
+        const prompt = `Expert recrutement groupe Nabboo, conseil ingénierie nucléaire/défense/spatial. 3 filiales: Vacoa (conception/études méca/élec), Navys (construction/essais/maintenance nucléaire), Ginko (contrôle-commande).
 
 Critères: Filiale: ${sub} | Poste: ${criteria.jobTitle || "?"} | Compétences: ${criteria.skills || "?"} | Localisation: ${criteria.location || "France"} | Secteurs: ${criteria.sectors.join(", ") || "Tous"} | Expérience: ${criteria.experience.length === 0 ? "Tout" : criteria.experience.join(", ")} | Besoin: ${criteria.description || "?"} | Habilitation: ${criteria.habilitable ? "OUI" : "NON"}${hab}
 
-${profiles.length} profils:\n${summaries}
+${batch.length} profils:\n${summaries}
 
 Réponds UNIQUEMENT JSON valide:
-[{"index":1,"score":85,"recommendation":"Excellent","reasoning":"2-3 phrases","suggestedSubsidiary":"Vacoa","keyStrengths":["x"],"concerns":["y"],"habilitableStatus":"${criteria.habilitable ? "eligible/non-eligible" : "non-requis"}","boondTitle":"titre le plus proche de la liste"}]
+[{"index":${startIdx + 1},"score":85,"recommendation":"Excellent","reasoning":"2-3 phrases","suggestedSubsidiary":"Vacoa","keyStrengths":["x"],"concerns":["y"],"habilitableStatus":"${criteria.habilitable ? "eligible/non-eligible" : "non-requis"}","boondTitle":"titre le plus proche de la liste"}]
 
 IMPORTANT pour boondTitle: choisis le titre le PLUS PROCHE dans cette liste EXACTE (copie-le tel quel):
 ${boondTitles.join(", ")}
 Si AUCUN titre de la liste ne correspond au métier recherché, utilise le format: Spécifique "${criteria.jobTitle}"
 
-Score 0-100, exigeant. Trie meilleur→moins bon.`;
+Score 0-100, exigeant. Trie meilleur→moins bon. IMPORTANT: Analyse TOUS les ${batch.length} profils, n'en oublie aucun.`;
 
-    try {
-      setProgress(30); setProgressMsg("Claude analyse...");
-      const data = await callClaude(claudeApiKey, "claude-sonnet-4-20250514", 4000, prompt, 3, (att, max) => setProgressMsg(`⏳ Limite API atteinte, nouvelle tentative ${att}/${max} dans 30s...`));
-      setProgress(70); setProgressMsg("Finalisation...");
-      const text = data.content.map(c => c.text || "").join("");
-      const m = text.match(/\[[\s\S]*\]/);
-      if (!m) throw new Error("Format inattendu");
-      const scored = JSON.parse(m[0]);
-      setResults(scored.map(s => { const p = profiles[s.index - 1]; return p ? { ...p, ...s } : null; }).filter(Boolean).sort((a, b) => b.score - a.score));
+        const data = await callClaude(claudeApiKey, "claude-sonnet-4-20250514", 8000, prompt, 3, (att, max) => setProgressMsg(`⏳ Limite API, tentative ${att}/${max}... (lot ${b + 1}/${batches.length})`));
+        const text = data.content.map(c => c.text || "").join("");
+        const m = text.match(/\[[\s\S]*\]/);
+        if (m) {
+          const batchResults = JSON.parse(m[0]);
+          allResults = allResults.concat(batchResults);
+        }
+      }
+      setProgress(95); setProgressMsg(`Tri de ${allResults.length} résultats...`);
+      if (allResults.length === 0) throw new Error("Aucun résultat d'analyse obtenu");
+      allResults.sort((a, b) => (b.score || 0) - (a.score || 0));
+      setResults(allResults.map(s => { const p = profiles[s.index - 1]; return p ? { ...p, ...s } : null; }).filter(Boolean));
       setProgress(100); setTimeout(() => setStep(4), 500);
     } catch (err) { setError("Erreur: " + err.message); setStep(2); }
   };
@@ -507,7 +519,7 @@ INSTRUCTIONS:
           <div style={{ width: 36, height: 36, borderRadius: 8, background: `linear-gradient(135deg, ${ACCENT}, #d4782e)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, fontWeight: 700, color: "#fff" }}>N</div>
           <div>
             <div style={{ color: "#fff", fontSize: 16, fontWeight: 700 }}>ClaudeBoost</div>
-            <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 10 }}>Le NABBOOST ... de Claude — v27</div>
+            <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 10 }}>Le NABBOOST ... de Claude — v29</div>
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -604,7 +616,7 @@ INSTRUCTIONS:
         {step === 2 && (<div style={{ animation: "fadeIn 0.4s" }}><div style={{ textAlign: "center", marginBottom: 20, fontFamily: "'Playfair Display', serif", fontSize: 24, fontWeight: 700, color: NABBOO_BLUE }}>{profiles.length} profils chargés</div><div style={{ fontSize: 13, textAlign: "center", color: MUTED, marginBottom: 24 }}>{criteria.habilitable && <span style={{ color: "#c0392b", fontWeight: 600 }}>🔒 Filtre habilitabilité · </span>}Prêt pour l'analyse</div><div style={{ background: CARD_BG, borderRadius: 14, padding: 20, marginBottom: 20, boxShadow: "0 1px 6px rgba(0,0,0,0.06)", maxHeight: 300, overflow: "auto" }}>{profiles.slice(0, 5).map((p, i) => (<div key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: i < 4 ? "1px solid #f0f0f0" : "none" }}><div style={{ width: 36, height: 36, borderRadius: "50%", background: `linear-gradient(135deg, ${NABBOO_BLUE}, #34495e)`, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 14, fontWeight: 600, flexShrink: 0 }}>{(p.firstName || "?")[0]}</div><div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: 14, fontWeight: 600, color: NABBOO_BLUE }}>{p.fullName}</div><div style={{ fontSize: 12, color: MUTED, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.headline || p.jobTitle} · {p.company}</div></div></div>))}{profiles.length > 5 && <div style={{ fontSize: 12, color: MUTED, textAlign: "center", paddingTop: 8 }}>+ {profiles.length - 5} autres</div>}</div><div style={{ display: "flex", gap: 12, justifyContent: "space-between" }}><button onClick={() => { setStep(0); setProfiles([]); }} style={{ padding: "12px 20px", borderRadius: 10, border: "2px solid #e0e0e0", background: "#fff", fontSize: 13, color: MUTED, cursor: "pointer" }}>← Critères</button><button onClick={runAnalysis} style={{ padding: "12px 28px", borderRadius: 10, border: "none", background: `linear-gradient(135deg, ${ACCENT}, #d4782e)`, fontSize: 15, fontWeight: 700, color: "#fff", cursor: "pointer", boxShadow: "0 4px 12px rgba(232,150,62,0.3)" }}>🧠 Lancer l'analyse IA</button></div></div>)}
 
         {/* STEP 3: Analyzing */}
-        {step === 3 && (<div style={{ animation: "fadeIn 0.4s", textAlign: "center", paddingTop: 50 }}><div style={{ fontFamily: "'Playfair Display', serif", fontSize: 24, fontWeight: 700, color: NABBOO_BLUE, marginBottom: 20 }}>Analyse en cours</div><div style={{ width: 240, height: 8, borderRadius: 4, background: "#e0e0e0", margin: "0 auto 16px", overflow: "hidden" }}><div style={{ width: `${progress}%`, height: "100%", borderRadius: 4, background: `linear-gradient(90deg, ${ACCENT}, #d4782e)`, transition: "width 0.5s" }} /></div><div style={{ fontSize: 14, color: MUTED }}>{progressMsg}</div><div style={{ fontSize: 48, marginTop: 28, animation: "pulse 1.5s infinite" }}>🧠</div></div>)}
+        {step === 3 && (<div style={{ animation: "fadeIn 0.4s", textAlign: "center", paddingTop: 50 }}><div style={{ fontFamily: "'Playfair Display', serif", fontSize: 24, fontWeight: 700, color: NABBOO_BLUE, marginBottom: 20 }}>Analyse en cours</div><div style={{ width: 280, margin: "0 auto 8px", position: "relative" }}><div style={{ width: "100%", height: 10, borderRadius: 5, background: "#e0e0e0", overflow: "hidden" }}><div style={{ width: `${progress}%`, height: "100%", borderRadius: 5, background: `linear-gradient(90deg, ${ACCENT}, #d4782e)`, transition: "width 0.8s ease" }} /></div><div style={{ fontSize: 13, fontWeight: 600, color: ACCENT, marginTop: 6 }}>{progress}%</div></div><div style={{ fontSize: 14, color: MUTED, marginTop: 8 }}>{progressMsg}</div><div style={{ fontSize: 48, marginTop: 28, animation: "pulse 1.5s infinite" }}>🧠</div></div>)}
 
         {/* STEP 4: Results */}
         {step === 4 && (<div style={{ animation: "fadeIn 0.4s" }}>
