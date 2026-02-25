@@ -55,12 +55,19 @@ const subsidiaries = [
   { id: "ginko", name: "GINKO", desc: "Automatisation & Contrôle-commande", emoji: "🔧" },
 ];
 const sectors = ["Nucléaire", "Défense", "Spatial", "Énergie", "Industrie", "Aéronautique"];
-const defaultCriteria = { subsidiary: "", jobTitle: "", skills: "", location: "", sectors: [], experience: "any", description: "", habilitable: false };
+const defaultCriteria = { subsidiary: "", jobTitle: "", skills: "", location: "", sectors: [], experience: [], description: "", habilitable: false };
 
 function buildLinkedInSearchURL(c) {
   let kw = c.jobTitle || "";
   if (c.skills) kw += " " + c.skills;
-  return `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(kw.trim())}&origin=GLOBAL_SEARCH_HEADER`;
+  let url = `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(kw.trim())}&origin=GLOBAL_SEARCH_HEADER`;
+  if (c.experience && c.experience.length > 0) {
+    // LinkedIn f_E: 1=Internship, 2=Entry(0-2), 3=Associate(3-5), 4=Mid-Senior(6-10), 5=Director, 6=Executive
+    const expMap = { junior: ["2"], mid: ["3", "4"], senior: ["4", "5", "6"] };
+    const ids = [...new Set(c.experience.flatMap(e => expMap[e] || []))];
+    if (ids.length > 0) url += `&f_E=${encodeURIComponent(JSON.stringify(ids))}`;
+  }
+  return url;
 }
 
 // --- CONFIGURATION STORAGE ---
@@ -118,7 +125,9 @@ function NabbooMatcher() {
   const session = loadSession();
   const [step, setStep] = useState(session.step || 0);
   const [profiles, setProfiles] = useState(session.profiles || []);
-  const [criteria, setCriteria] = useState(session.criteria || defaultCriteria);
+  const savedCriteria = session.criteria || defaultCriteria;
+  if (!Array.isArray(savedCriteria.experience)) savedCriteria.experience = [];
+  const [criteria, setCriteria] = useState(savedCriteria);
   const [results, setResults] = useState(session.results || []);
   const [progress, setProgress] = useState(0);
   const [progressMsg, setProgressMsg] = useState("");
@@ -245,19 +254,29 @@ function NabbooMatcher() {
       const allProfiles = parseCSVText(csvText);
       // Filter to only profiles from THIS search query
       const norm = s => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-      const searchKeywords = norm(criteria.jobTitle + " " + (criteria.skills || "")).trim().split(/\s+/).filter(Boolean);
+      const allKeywords = norm(criteria.jobTitle + " " + (criteria.skills || "")).trim().split(/\s+/).filter(Boolean);
+      const titleKeywords = norm(criteria.jobTitle || "").trim().split(/\s+/).filter(Boolean);
+      
+      // Try matching all keywords first
       let p = allProfiles.filter(pr => {
         if (!pr.query) return true;
-        try {
-          const q = norm(decodeURIComponent(pr.query));
-          return searchKeywords.every(kw => q.includes(kw));
-        } catch { return false; }
+        try { const q = norm(decodeURIComponent(pr.query)); return allKeywords.every(kw => q.includes(kw)); } catch { return false; }
       });
-      if (p.length === 0 && allProfiles.length > 0) {
-        console.log("v6 keyword filter matched 0, falling back to latest profiles");
-        p = allProfiles.slice(0, 100);
+      // Fallback: match job title keywords only
+      if (p.length === 0 && titleKeywords.length > 0) {
+        console.log("v6 all-keyword filter matched 0, trying title only:", titleKeywords);
+        p = allProfiles.filter(pr => {
+          if (!pr.query) return true;
+          try { const q = norm(decodeURIComponent(pr.query)); return titleKeywords.every(kw => q.includes(kw)); } catch { return false; }
+        });
       }
-      console.log("v6 profiles:", p.length, "/ total:", allProfiles.length, "keywords:", searchKeywords);
+      // Last resort: take most recent profiles by timestamp
+      if (p.length === 0 && allProfiles.length > 0) {
+        console.log("v6 title filter also matched 0, taking most recent 100 by timestamp");
+        p = [...allProfiles].sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0)).slice(0, 100);
+      }
+      console.log("v6 profiles:", p.length, "/ total:", allProfiles.length, "keywords:", allKeywords);
+      if (allProfiles.length > 0) console.log("v6 sample query:", allProfiles[0].query);
       if (p.length > 0) { setProfiles(p); setProgress(100); setPbStatus(`${p.length} profils !`); setTimeout(() => setStep(2), 1000); return; }
       throw new Error("CSV vide. Réessayez avec d'autres mots-clés.");
     } catch (err) {
@@ -304,7 +323,7 @@ function NabbooMatcher() {
     const sub = criteria.subsidiary ? subsidiaries.find(s => s.id === criteria.subsidiary)?.name || "Toutes" : "Toutes";
     const prompt = `Expert recrutement groupe Nabboo, conseil ingénierie nucléaire/défense/spatial. 3 filiales: Vacoa (conception/études méca/élec), Navys (construction/essais/maintenance nucléaire), Ginko (contrôle-commande).
 
-Critères: Filiale: ${sub} | Poste: ${criteria.jobTitle || "?"} | Compétences: ${criteria.skills || "?"} | Localisation: ${criteria.location || "France"} | Secteurs: ${criteria.sectors.join(", ") || "Tous"} | Expérience: ${criteria.experience === "any" ? "Tout" : criteria.experience} | Besoin: ${criteria.description || "?"} | Habilitation: ${criteria.habilitable ? "OUI" : "NON"}${hab}
+Critères: Filiale: ${sub} | Poste: ${criteria.jobTitle || "?"} | Compétences: ${criteria.skills || "?"} | Localisation: ${criteria.location || "France"} | Secteurs: ${criteria.sectors.join(", ") || "Tous"} | Expérience: ${criteria.experience.length === 0 ? "Tout" : criteria.experience.join(", ")} | Besoin: ${criteria.description || "?"} | Habilitation: ${criteria.habilitable ? "OUI" : "NON"}${hab}
 
 ${profiles.length} profils:\n${summaries}
 
@@ -488,7 +507,7 @@ INSTRUCTIONS:
           <div style={{ width: 36, height: 36, borderRadius: 8, background: `linear-gradient(135deg, ${ACCENT}, #d4782e)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, fontWeight: 700, color: "#fff" }}>N</div>
           <div>
             <div style={{ color: "#fff", fontSize: 16, fontWeight: 700 }}>ClaudeBoost</div>
-            <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 10 }}>Le NABBOOST ... de Claude — v26</div>
+            <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 10 }}>Le NABBOOST ... de Claude — v27</div>
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -563,7 +582,7 @@ INSTRUCTIONS:
               <div style={{ marginBottom: 16 }}><label style={{ fontSize: 13, fontWeight: 600, color: NABBOO_BLUE, display: "block", marginBottom: 6 }}>Compétences clés</label><input type="text" value={criteria.skills} onChange={e => setCriteria(p => ({ ...p, skills: e.target.value }))} placeholder="Ex: CATIA V5, Solidworks, RCC-M..." style={inputStyle} /></div>
               <div style={{ marginBottom: 16 }}><label style={{ fontSize: 13, fontWeight: 600, color: NABBOO_BLUE, display: "block", marginBottom: 6 }}>Localisation souhaitée</label><input type="text" value={criteria.location} onChange={e => setCriteria(p => ({ ...p, location: e.target.value }))} placeholder="Ex: Île-de-France, Lyon, Cherbourg..." style={inputStyle} /></div>
               <div style={{ marginBottom: 16 }}><label style={{ fontSize: 13, fontWeight: 600, color: NABBOO_BLUE, display: "block", marginBottom: 8 }}>Secteurs d'intérêt</label><div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{sectors.map(s => (<button key={s} onClick={() => toggleSector(s)} style={{ padding: "6px 14px", borderRadius: 20, border: criteria.sectors.includes(s) ? `2px solid ${NABBOO_BLUE}` : "2px solid #e0e0e0", background: criteria.sectors.includes(s) ? NABBOO_BLUE : "#fff", color: criteria.sectors.includes(s) ? "#fff" : NABBOO_BLUE, fontSize: 12, fontWeight: 500, cursor: "pointer" }}>{s}</button>))}</div></div>
-              <div style={{ marginBottom: 16 }}><label style={{ fontSize: 13, fontWeight: 600, color: NABBOO_BLUE, display: "block", marginBottom: 8 }}>Niveau d'expérience</label><div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{[{ id: "any", label: "Tout niveau" }, { id: "junior", label: "Junior (0-3 ans)" }, { id: "mid", label: "Confirmé (3-7 ans)" }, { id: "senior", label: "Senior (7+ ans)" }].map(exp => (<button key={exp.id} onClick={() => setCriteria(p => ({ ...p, experience: exp.id }))} style={{ padding: "6px 14px", borderRadius: 20, border: criteria.experience === exp.id ? `2px solid ${ACCENT}` : "2px solid #e0e0e0", background: criteria.experience === exp.id ? "rgba(232,150,62,0.1)" : "#fff", color: criteria.experience === exp.id ? ACCENT : MUTED, fontSize: 12, fontWeight: 500, cursor: "pointer" }}>{exp.label}</button>))}</div></div>
+              <div style={{ marginBottom: 16 }}><label style={{ fontSize: 13, fontWeight: 600, color: NABBOO_BLUE, display: "block", marginBottom: 8 }}>Niveau d'expérience</label><div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{[{ id: "junior", label: "Junior (0-3 ans)" }, { id: "mid", label: "Confirmé (3-7 ans)" }, { id: "senior", label: "Senior (7+ ans)" }].map(exp => (<button key={exp.id} onClick={() => setCriteria(p => ({ ...p, experience: p.experience.includes(exp.id) ? p.experience.filter(e => e !== exp.id) : [...p.experience, exp.id] }))} style={{ padding: "6px 14px", borderRadius: 20, border: criteria.experience.includes(exp.id) ? `2px solid ${ACCENT}` : "2px solid #e0e0e0", background: criteria.experience.includes(exp.id) ? "rgba(232,150,62,0.1)" : "#fff", color: criteria.experience.includes(exp.id) ? ACCENT : MUTED, fontSize: 12, fontWeight: 500, cursor: "pointer" }}>{exp.label}</button>))}</div></div>
               {/* Habilitation */}
               <div style={{ marginBottom: 16 }}><div onClick={() => setCriteria(p => ({ ...p, habilitable: !p.habilitable }))} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", borderRadius: 10, cursor: "pointer", border: criteria.habilitable ? "2px solid #c0392b" : "2px solid #e0e0e0", background: criteria.habilitable ? "rgba(192,57,43,0.05)" : "#fff" }}><div style={{ width: 42, height: 24, borderRadius: 12, position: "relative", background: criteria.habilitable ? "#c0392b" : "#ccc", flexShrink: 0 }}><div style={{ width: 20, height: 20, borderRadius: "50%", background: "#fff", position: "absolute", top: 2, left: criteria.habilitable ? 20 : 2, transition: "left 0.3s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)" }} /></div><div><div style={{ fontSize: 13, fontWeight: 600, color: criteria.habilitable ? "#c0392b" : NABBOO_BLUE }}>🔒 Habilitabilité requise</div><div style={{ fontSize: 11, color: MUTED }}>Nationalité française requise (défense/nucléaire)</div></div></div></div>
               <div style={{ marginBottom: 20 }}><label style={{ fontSize: 13, fontWeight: 600, color: NABBOO_BLUE, display: "block", marginBottom: 6 }}>Description du besoin</label><textarea value={criteria.description} onChange={e => setCriteria(p => ({ ...p, description: e.target.value }))} placeholder="Ex: Mission longue durée chez Framatome, programme EPR2..." rows={2} style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit", fontSize: 13 }} /></div>
